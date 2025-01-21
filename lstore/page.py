@@ -1,9 +1,10 @@
+from lstore.config import PAGE_SIZE
 
 class Page:
 
     def __init__(self):
         self.num_records = 0
-        self.data = bytearray(4096)
+        self.data = bytearray(PAGE_SIZE)
 
     def has_capacity(self):
         pass

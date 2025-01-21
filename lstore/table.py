@@ -1,11 +1,6 @@
 from lstore.index import Index
 from time import time
-
-INDIRECTION_COLUMN = 0
-RID_COLUMN = 1
-TIMESTAMP_COLUMN = 2
-SCHEMA_ENCODING_COLUMN = 3
-
+from lstore.config import *
 
 class Record:
 
