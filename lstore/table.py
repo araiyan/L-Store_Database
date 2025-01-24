@@ -21,6 +21,7 @@ class Table:
         self.key = key
         self.num_columns = num_columns
         self.page_directory = {}
+        self.records = []
         self.index = Index(self)
         pass
 
