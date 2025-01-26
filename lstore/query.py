@@ -62,13 +62,42 @@ class Query:
         pass
 
     
-    """
+        """
     # Update a record with specified key and columns
     # Returns True if update is succesful
     # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking
     """
     def update(self, primary_key, *columns):
-        pass
+        
+        # Locate records using primary key
+        rid_location = self.table.index.locate() # Uhhh idk what goes here
+
+        # Invalid record (Maybe I need to consider duplicates since primary_keys can only appear once? len(rid_location) != 0) 
+        if(not rid_location):
+            return False
+
+        # Go through all records that have the same columns as what we're looking for with the primary_key
+        for rid in rid_location:
+
+            record = self.table.page_directory.somehowgetRID(rid)
+            
+            # If the record doesn't exist somehow, just ignore it
+            if(not record):
+                    continue
+            
+            updated_columns = list(record.columns)
+            for i, value in enumerate(columns):
+                if value is not None:
+                    updated_columns[i] = value
+
+            # Create a new record with the updated columns
+            new_rid = rid + 1  # Assuming RIDs increment sequentially
+            updated_record = Record(new_rid, primary_key, updated_columns)
+
+            # Update the page directory with the new record
+            self.table.page_directory[new_rid] = updated_record
+
+        return True
 
     
     """
