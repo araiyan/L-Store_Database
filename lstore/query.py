@@ -10,7 +10,7 @@ class Query:
     Any query that crashes (due to exceptions) should return False
     """
     def __init__(self, table):
-        self.table = table
+        self.table:Table = table
         pass
 
     
@@ -31,6 +31,7 @@ class Query:
     """
     def insert(self, *columns):
         schema_encoding = '0' * self.table.num_columns
+        # Note: Ensure schema_encoding is converted to int before inserted into record.column
         pass
 
     

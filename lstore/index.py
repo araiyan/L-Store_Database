@@ -1,26 +1,24 @@
 """
 A data strucutre holding indices for various columns of a table. Key column should be indexd by default, other columns can be indexed through this object. Indices are usually B-Trees, but other data structures can be used as well.
 """
+from lstore.config import *
 
 class Index:
 
-    # Create an index for the Key column using keys and RID from the array 
-    # of records. Keys are mapped to their RID and are inserted together into
+    # Create an index for the Key column using keys and RID from page
+    # directory. Keys are mapped to their RID and are inserted together into
     # the BTree
     def __init__(self, table):
         # One index for each table. All our empty initially.
         self.indices = [None] * table.num_columns
 
-        self.column_num_for_key = table.key
-        self.key_index= {}
-        self.records = table.records
+        self.key_column_num = table.key
+        self.key_index= table.page_directory
 
-        for record in self.records:
-            self.key_index[record.rid] = [record.key]
-
-        self.indices[self.column_num_for_key] = BTree(3)
+        self.indices[self.key_column_num] = BTree()
         for item in self.key_index.items(): 
-            self.indices[self.column_num_for_key].insert(item)
+
+            self.indices[self.key_column_num].insert(item)
 
 
     """
@@ -30,9 +28,8 @@ class Index:
     # We could adjust replace column number with column name when we come 
     # up with column names.
 
-    #Referencing from the Record class, RID is column 0 and Key is column 1
     def locate(self, column, value):
-        result = self.indices[column].search(value)
+        result = self.indices[column].search_all(value,value)
         return result
             
 
@@ -47,19 +44,16 @@ class Index:
     """
     # optional: Create index on specific column
     """
-    # Create a hash table to map value in column number to its rid
-    # and then insert each item in the hash table into a B tree.
-    # Reference the column number'th value in the array of indices to
-    # the Btree
+    # Unfinished
 
-    def create_index(self, column_number):
+    def create_index(self, column_number, *column):
         """Create an index for a specific column."""
         if self.indices[column_number] is None:
             hash_table = {}
-            for record in self.records:
-                hash_table[record.rid] = [record.columns[column_number-2]]
+            # Insert column values into hash table after getting columns
+            # from actual page
 
-            self.indices[column_number] = BTree(3)
+            self.indices[column_number] = BTree()
             for item in hash_table.items(): 
                 self.indices[column_number].insert(item)
 
@@ -82,87 +76,78 @@ class BTreeNode:
         self.children = []
 
 class BTree:
-    def __init__(self, t):
+    def __init__(self):
         self.root = BTreeNode(True)
-        self.t = t
 
-    def insert(self, k):
+    def insert(self, value):
+        num_child_nodes = 3
         root = self.root
-        if len(root.keys) == (2 * self.t) - 1:
-            temp = BTreeNode(leaf=False)
-            self.root = temp
-            temp.children.append(root)
-            self.split_child(temp, 0)
-            self.insert_non_full(temp, k)
-        else:
-            self.insert_non_full(root, k)
 
-    def insert_non_full(self, x, k):
-        i = len(x.keys) - 1
-        if x.leaf:
-            x.keys.append(None)
-            while i >= 0 and k < x.keys[i]:
-                x.keys[i + 1] = x.keys[i]
-                i -= 1
-            x.keys[i + 1] = k
+        if len(root.keys) == (2 * num_child_nodes) - 1:
+            temp_root = BTreeNode(leaf=False)
+            self.root = temp_root
+            temp_root.children.append(root)
+            self.split_child(temp_root, 0, num_child_nodes)
+            self.insert_non_full(temp_root, value, num_child_nodes)
         else:
-            while i >= 0 and k < x.keys[i]:
+            self.insert_non_full(root, value, num_child_nodes)
+
+    def insert_non_full(self, cur_node, cur_key, num_child_nodes):
+        i = len(cur_node.keys) - 1
+
+        if cur_node.leaf:
+            cur_node.keys.append(None)
+
+            while i >= 0 and cur_key < cur_node.keys[i]:
+                cur_node.keys[i + 1] = cur_node.keys[i]
+                i -= 1
+            cur_node.keys[i + 1] = cur_key
+        else:
+            while i >= 0 and cur_key < cur_node.keys[i]:
                 i -= 1
             i += 1
-            if len(x.children[i].keys) == (2 * self.t) - 1:
-                self.split_child(x, i)
-                if k > x.keys[i]:
+            if len(cur_node.children[i].keys) == (2 * num_child_nodes) - 1:
+                self.split_child(cur_node, i, num_child_nodes)
+                if cur_key > cur_node.keys[i]:
                     i += 1
-            self.insert_non_full(x.children[i], k)
 
-    def split_child(self, x, i):
-        t = self.t
-        y = x.children[i]
-        z = BTreeNode(leaf=y.leaf)
-        x.keys.insert(i, y.keys[t - 1])
-        z.keys = y.keys[t: (2 * t) - 1]
-        y.keys = y.keys[0: t - 1]
-        if not y.leaf:
-            z.children = y.children[t: 2 * t]
-            y.children = y.children[0: t - 1]
-        x.children.insert(i + 1, z)
+            self.insert_non_full(cur_node.children[i], cur_key, num_child_nodes)
 
-    def search(self, value, node=None):
-        node = self.root
-        all_values = []
-        i = 0
-        for i in range(len(node.keys)):
-            if value == node.keys[i][1][0]:
-                all_values.append(node.keys[i][0])
+    def split_child(self, cur_node, i, num_child_nodes):
+        prev_child = cur_node.children[i]
+        new_child = BTreeNode(leaf=prev_child.leaf)
 
-        if node.leaf:
-            if all_values:
-                return all_values
-            else:
-                return None
-        
-        for child in node.children:
-            result = self.search_all(value, child)
-            if result:
-                all_values.extend(result)
+        cur_node.keys.insert(i, prev_child.keys[num_child_nodes - 1])
+        new_child.keys = prev_child.keys[num_child_nodes: (2 * num_child_nodes) - 1]
+        prev_child.keys = prev_child.keys[0: num_child_nodes - 1]
 
+        if not prev_child.leaf:
+            new_child.children = prev_child.children[num_child_nodes: 2 * num_child_nodes]
+            prev_child.children = prev_child.children[0: num_child_nodes - 1]
 
+        cur_node.children.insert(i + 1, new_child)
     
-    def search_all(self, begin, end,node=None):
-        node = self.root
+    def search_all(self, begin, end, node=None):
+        if node is None:
+            node = self.root
+
         all_values = []
-        i = 0
+        # RID to value are mapped as a tuple
+        rid = 0
+        value = 1
         for i in range(len(node.keys)):
-            if begin <= int(node.keys[i][1][0]) <= end:
-                all_values.append(node.keys[i][0])
+            if repr(begin) <= repr(node.keys[i][value]) <= repr(end):
+                all_values.append(node.keys[i][rid])
 
         if node.leaf:
             if all_values:
                 return all_values
             else:
                 return None
-        
+
         for child in node.children:
             result = self.search_all(begin, end, child)
             if result:
                 all_values.extend(result)
+
+        return all_values
