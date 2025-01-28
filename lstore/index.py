@@ -11,15 +11,32 @@ class Index:
     def __init__(self, table):
         # One index for each table. All our empty initially.
         self.indices = [None] * table.num_columns
+        self.page_directory = table.page_directory # for creating index
+        self.table_info = table
 
-        self.key_column_num = table.key
-        self.key_index= table.page_directory
-
+        self.key_index = self.get_column(table.key)
         self.indices[self.key_column_num] = BTree()
+
         for item in self.key_index.items(): 
+            self.indices[table.key].insert(item)
 
-            self.indices[self.key_column_num].insert(item)
 
+    # Check for number of rids for a specific entry, if there are more than one
+    # entry then get key from lastest update in tail page
+    # Checking tail page info based on table
+    def get_column(self, column_number):
+        hash_table = {}
+        for rid, (page_number, page_index) in self.page_directory.items(): 
+            if len(self.page_directory[rid]) == 1:
+                key = self.table_info.base_page[column_number][page_number].get(page_index)
+            elif len(self.page_directory[rid]) == 0:
+                raise ValueError("Value does not exist for this RID.")
+            elif len(self.page_directory[rid]) > 1:
+                # Need more page/table info to get latest version of column value
+                page_number, page_index = self.page_directory[rid][-1]
+                key = self.table_info.tail_page[column_number][page_number].get(page_index)
+            hash_table[rid] = key
+        return hash_table
 
     """
     # returns the location of all records with the given value on column "column"
@@ -29,8 +46,8 @@ class Index:
     # up with column names.
 
     def locate(self, column, value):
-        result = self.indices[column].search_all(value,value)
-        return result
+        return self.indices[column].search_all(value,value)
+
             
 
     """
@@ -38,20 +55,17 @@ class Index:
     """
     # Similarly using column number for searches instead of column name
     def locate_range(self, begin, end, column):
-        result = self.indices[column].search_all(begin, end)
-        return result    
+        return self.indices[column].search_all(begin, end)  
 
     """
     # optional: Create index on specific column
     """
-    # Unfinished
 
-    def create_index(self, column_number, *column):
+    # Need more paging info to finish
+    def create_index(self, column_number):
         """Create an index for a specific column."""
         if self.indices[column_number] is None:
-            hash_table = {}
-            # Insert column values into hash table after getting columns
-            # from actual page
+            hash_table = self.get_column(column_number)
 
             self.indices[column_number] = BTree()
             for item in hash_table.items(): 
@@ -136,6 +150,8 @@ class BTree:
         rid = 0
         value = 1
         for i in range(len(node.keys)):
+            if type(repr(node.keys[i][value])) != type(repr(begin)) or type(repr(node.keys[i][value])) != type(repr(end)):
+                raise TypeError("Comparing two different types of variables")
             if repr(begin) <= repr(node.keys[i][value]) <= repr(end):
                 all_values.append(node.keys[i][rid])
 
@@ -149,5 +165,5 @@ class BTree:
             result = self.search_all(begin, end, child)
             if result:
                 all_values.extend(result)
-                
+
         return all_values 
