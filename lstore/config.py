@@ -1,4 +1,6 @@
 PAGE_SIZE = 4096
+MAX_PAGE_RANGE = 32
+'''How many base pages are in a Page Range'''
 
 INDIRECTION_COLUMN = 0
 RID_COLUMN = 1
