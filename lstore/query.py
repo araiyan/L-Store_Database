@@ -45,7 +45,32 @@ class Query:
     # Assume that select will never be called on a key that doesn't exist
     """
     def select(self, search_key, search_key_index, projected_columns_index):
-        pass
+        try:
+            rid_list = self.table.index.locate(search_key_index, search_key)
+
+            if not rid_list:
+                return False
+
+            record_objs = []
+
+            for rid in rid_list:
+                record = self.table.page_directory.get(rid, None)
+                if record is None:
+                    continue
+
+                projected_columns = []
+                for i in range(len(projected_columns_index)):
+                    if projected_columns_index[i] == 1:
+                        projected_columns.append(record.columns[i])
+                    else:
+                        projected_columns.append(None)
+                record_objs.append(Record(record.rid, record.key, projected_columns))
+
+            return record_objs if record_objs else False
+        
+        except Exception as e:
+            print(f"Error in select: {e}")
+            return False
 
     
     """
