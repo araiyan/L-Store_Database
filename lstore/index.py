@@ -2,168 +2,123 @@
 A data strucutre holding indices for various columns of a table. Key column should be indexd by default, other columns can be indexed through this object. Indices are usually B-Trees, but other data structures can be used as well.
 """
 from lstore.config import *
+from sortedcontainers import SortedList
 
 class Index:
 
-    # Create an index for the Key column using keys and RID from page
-    # directory. Keys are mapped to their RID and are inserted together into
-    # the BTree
     def __init__(self, table):
         # One index for each table. All our empty initially.
-        self.indices = [None] * table.num_columns
-        self.page_directory = table.page_directory # for creating index
-        self.table_info = table
-
-        self.key_index = self.get_column(table.key)
-        self.indices[self.key_column_num] = BTree()
-
-        for item in self.key_index.items(): 
-            self.indices[table.key].insert(item)
-
-
-    # Check for number of rids for a specific entry, if there are more than one
-    # entry then get key from lastest update in tail page
-    # Checking tail page info based on table
-    def get_column(self, column_number):
-        hash_table = {}
-        for rid, (page_number, page_index) in self.page_directory.items(): 
-            if len(self.page_directory[rid]) == 1:
-                key = self.table_info.base_page[column_number][page_number].get(page_index)
-            elif len(self.page_directory[rid]) == 0:
-                raise ValueError("Value does not exist for this RID.")
-            elif len(self.page_directory[rid]) > 1:
-                # Need more page/table info to get latest version of column value
-                page_number, page_index = self.page_directory[rid][-1]
-                key = self.table_info.tail_page[column_number][page_number].get(page_index)
-            hash_table[rid] = key
-        return hash_table
+        self.indices = [None] * table.num_columns # since we're not indexing hidden columns, unless?
+        self.num_columns = table.num_columns
+        self.key = table.key
+        for i in range(table.num_columns):
+            self.create_index(i)
 
     """
-    # returns the location of all records with the given value on column "column"
+    # returns the location of all records with the given value on column "column" as a list
+    # returns None if no rid found
     """
-    # Currently using column number to search up the values and their RID.
-    # We could adjust replace column number with column name when we come 
-    # up with column names.
-
     def locate(self, column, value):
-        return self.indices[column].search_all(value,value)
-
-            
-
+        return self.search_all(self.indices[column], value, value)
+       
     """
-    # Returns the RIDs of all records with values in column "column" between "begin" and "end"
+    # Returns the RIDs of all records with values in column "column" between "begin" and "end" as a list
+    # returns None if no rid found
     """
-    # Similarly using column number for searches instead of column name
     def locate_range(self, begin, end, column):
-        return self.indices[column].search_all(begin, end)  
+        return self.search_all(self.indices[column], begin, end) 
 
     """
     # optional: Create index on specific column
     """
-
-    # Need more paging info to finish
     def create_index(self, column_number):
-        """Create an index for a specific column."""
         if self.indices[column_number] is None:
-            hash_table = self.get_column(column_number)
-
-            self.indices[column_number] = BTree()
-            for item in hash_table.items(): 
-                self.indices[column_number].insert(item)
+            self.indices[column_number] = SortedList([])
+            return self.indices[column_number]
+        else:
+            raise ValueError(f"Cannot create index for column: {column_number}. Index already exists!")
 
     """
     # optional: Drop index of specific column
     """
-    # Drop the reference to the index
     def drop_index(self, column_number):
-        """Drop the index for a specific column."""
-        self.indices[column_number] = None
+        if self.indices[column_number]:
+            self.indices[column_number].clear()
+            self.indices[column_number] = None
 
-# BTree
-# https://www.geeksforgeeks.org/b-tree-in-python/
-# https://www.geeksforgeeks.org/introduction-of-b-tree-2/
+    """
+    # Search through values in the 2 tuple and returns all rid corresponds to the value
+    """
+    def search_all(self, column, begin, end):
+        low = 0
+        high = len(column) - 1
+        rids = []
+        while low <= high:
+            mid = low + (high - low) // 2
+            if begin <= column[mid][1] <= end:
+                temp_mid = mid + 1
+                while mid >= low and begin <= column[mid][1]:
+                    rids.append(column[mid][0])
+                    mid -= 1
+                while temp_mid <= high and column[temp_mid][1] <= end:
+                    rids.append(column[temp_mid][0])
+                    temp_mid += 1
+                return rids
+            elif column[mid][1] < begin:
+                low = mid + 1
+            elif column[mid][1] > end:
+                high = mid - 1
+        return None
 
-class BTreeNode:
-    def __init__(self, leaf=True):
-        self.leaf = leaf
-        self.keys = []
-        self.children = []
+    """
+    # Search for values with RID in the parameter in indices
+    """
+    def search_value(self, column, rid):
+        low = 0
+        high = len(column) - 1
+        while low <= high:
+            mid = low + (high - low) // 2
+            if rid == column[mid][0]:
+                return column[mid][1]
+            elif column[mid][0] < rid:
+                low = mid + 1
+            elif column[mid][0] > rid:
+                high = mid - 1
+        return None
 
-class BTree:
-    def __init__(self):
-        self.root = BTreeNode(True)
-
-    def insert(self, value):
-        num_child_nodes = 3
-        root = self.root
-
-        if len(root.keys) == (2 * num_child_nodes) - 1:
-            temp_root = BTreeNode(leaf=False)
-            self.root = temp_root
-            temp_root.children.append(root)
-            self.split_child(temp_root, 0, num_child_nodes)
-            self.insert_non_full(temp_root, value, num_child_nodes)
-        else:
-            self.insert_non_full(root, value, num_child_nodes)
-
-    def insert_non_full(self, cur_node, cur_key, num_child_nodes):
-        i = len(cur_node.keys) - 1
-
-        if cur_node.leaf:
-            cur_node.keys.append(None)
-
-            while i >= 0 and cur_key < cur_node.keys[i]:
-                cur_node.keys[i + 1] = cur_node.keys[i]
-                i -= 1
-            cur_node.keys[i + 1] = cur_key
-        else:
-            while i >= 0 and cur_key < cur_node.keys[i]:
-                i -= 1
-            i += 1
-            if len(cur_node.children[i].keys) == (2 * num_child_nodes) - 1:
-                self.split_child(cur_node, i, num_child_nodes)
-                if cur_key > cur_node.keys[i]:
-                    i += 1
-
-            self.insert_non_full(cur_node.children[i], cur_key, num_child_nodes)
-
-    def split_child(self, cur_node, i, num_child_nodes):
-        prev_child = cur_node.children[i]
-        new_child = BTreeNode(leaf=prev_child.leaf)
-
-        cur_node.keys.insert(i, prev_child.keys[num_child_nodes - 1])
-        new_child.keys = prev_child.keys[num_child_nodes: (2 * num_child_nodes) - 1]
-        prev_child.keys = prev_child.keys[0: num_child_nodes - 1]
-
-        if not prev_child.leaf:
-            new_child.children = prev_child.children[num_child_nodes: 2 * num_child_nodes]
-            prev_child.children = prev_child.children[0: num_child_nodes - 1]
-
-        cur_node.children.insert(i + 1, new_child)
+    """
+    # Update new RID for all indices when a record is updated
+    """
+    def update_all_indices(self, primary_key, *columns):
+        rid = self.search_all(self.indices[self.key], primary_key, primary_key)
+        if not rid:
+            raise ValueError(f"Cannot update indices. Key: {primary_key} not found!")
+        for i in range(0, self.num_columns):
+            if self.indices[i] != None:
+                value = self.search_value(self.indices[i], rid[0])
+                self.indices[i].discard((rid[0], value))
+                self.indices[i].add((columns[RID_COLUMN], columns[NUM_HIDDEN_COLUMNS + i]))
     
-    def search_all(self, begin, end, node=None):
-        if node is None:
-            node = self.root
+    """
+    # Takes a record and insert it into every indices
+    # Columns are inserted in a tuple(rid, column value)
+    """
+    def insert_in_all_indices(self, *columns):
+        rid = self.search_all(self.indices[self.key], columns[NUM_HIDDEN_COLUMNS + self.key], columns[NUM_HIDDEN_COLUMNS + self.key])
+        if rid != None:
+            raise ValueError(f"Column with key: {columns[NUM_HIDDEN_COLUMNS + self.key]} already exists.")
+        for i in range(NUM_HIDDEN_COLUMNS, len(columns)):
+            if self.indices[i - NUM_HIDDEN_COLUMNS] != None:
+                self.indices[i - NUM_HIDDEN_COLUMNS].add((columns[RID_COLUMN], columns[i]))
 
-        all_values = []
-        # RID to value are mapped as a tuple
-        rid = 0
-        value = 1
-        for i in range(len(node.keys)):
-            if type(repr(node.keys[i][value])) != type(repr(begin)) or type(repr(node.keys[i][value])) != type(repr(end)):
-                raise TypeError("Comparing two different types of variables")
-            if repr(begin) <= repr(node.keys[i][value]) <= repr(end):
-                all_values.append(node.keys[i][rid])
-
-        if node.leaf:
-            if all_values:
-                return all_values
-            else:
-                return None
-
-        for child in node.children:
-            result = self.search_all(begin, end, child)
-            if result:
-                all_values.extend(result)
-
-        return all_values 
+    """
+    # Remove element associated with rid : primary key from all indices
+    """
+    def delete_from_all_indices(self, primary_key):
+        rid = self.search_all(self.indices[self.key], primary_key, primary_key)
+        if not rid:
+            raise ValueError(f"Cannot delete from indices. Key: {primary_key} not found!")
+        for i in range(0, self.num_columns):
+            if self.indices[i] != None:
+                value = self.search_value(self.indices[i], rid[0])
+                self.indices[i].discard((rid[0], value))
