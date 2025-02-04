@@ -69,34 +69,49 @@ class Query:
     """
     def update(self, primary_key, *columns):
         
-        # Locate records using primary key
-        rid_location = self.table.index.locate() # Uhhh idk what goes here
+        # NOTE: NOT FOCUSING ON 2 PHASE LOCKING AS MILESTONE 1 REQUIRES ONLY A FUNCTIONING DB, NOT CONCURRENT
 
-        # Invalid record (Maybe I need to consider duplicates since primary_keys can only appear once? len(rid_location) != 0) 
-        if(not rid_location):
+        # We want to see if the record exists with the specified key; no point in continuing further without checking
+        rid_exists = self.table.index.locate(self.table.key, primary_key)
+        if rid_exists is None:
+            return False
+        
+        # Checking if we're passing the right number of values over to columns (one value per column, not more not less)
+        if len(columns) != self.table.num_columns:
             return False
 
-        # Go through all records that have the same columns as what we're looking for with the primary_key
-        for rid in rid_location:
+        
+        # Creating new tail record 
+        # =========================================================================================================================================
+        # The tail should have the same number of columns as the other pages so we should be multiplying by the total_num_columns value
+        # Multiplying by [None] atm since the columns don't have an assigned value / size (I think it works like this at least, should be similar to OS in that sense)
+        new_columns = [None] * self.table.total_num_columns
 
-            record = self.table.page_directory.somehowgetRID(rid)
+        # Insert values into the new column
+        for i, value in enumerate(columns):
+
+            # If we're modifying the primary_key then this update should be stopped since we can't change the primary_key column
+            if i == self.table.key and value != primary_key:
+                return False
             
-            # If the record doesn't exist somehow, just ignore it
-            if(not record):
-                    continue
-            
-            updated_columns = list(record.columns)
-            for i, value in enumerate(columns):
-                if value is not None:
-                    updated_columns[i] = value
+            # We want to skip past the hidden columns since those shouldn't be touched
+            new_columns[NUM_HIDDEN_COLUMNS + i] = value
 
-            # Create a new record with the updated columns
-            new_rid = rid + 1  # Assuming RIDs increment sequentially
-            updated_record = Record(new_rid, primary_key, updated_columns)
+        # Finally makes a new record tail page using the values created in this function. Records class will be used to update in update_record()
+        record = Record(rid = -1, key = primary_key, columns = new_columns)
 
-            # Update the page directory with the new record
-            self.table.page_directory[new_rid] = updated_record
+        # Assigning tail record in table
+        # =========================================================================================================================================
+        # Assign RID for newly created tail record
+        self.table.assign_rid_to_record(record)
 
+        # Initialize record entry into directory
+        self.table.page_directory[record.rid] = [None] * self.table.total_num_columns
+
+        # Updates the record in the table
+        self.table.update_record(record)
+
+        # Update successful
         return True
 
     
