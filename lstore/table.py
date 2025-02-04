@@ -30,7 +30,6 @@ class Table:
         self.num_columns = num_columns
         self.total_num_columns = num_columns + NUM_HIDDEN_COLUMNS
         self.page_directory = {}
-        self.records = []
         self.index = Index(self)
         
         self.base_pages = {}

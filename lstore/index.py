@@ -8,7 +8,7 @@ class Index:
 
     def __init__(self, table):
         # One index for each table. All our empty initially.
-        self.indices = [None] * table.num_columns # since we're not indexing hidden columns, unless?
+        self.indices = [None] * table.num_columns
         self.num_columns = table.num_columns
         self.key = table.key
         for i in range(table.num_columns):
@@ -19,14 +19,14 @@ class Index:
     # returns None if no rid found
     """
     def locate(self, column, value):
-        return self.search_all(self.indices[column], value, value)
+        return self.search_all_rid(self.indices[column], value, value)
        
     """
     # Returns the RIDs of all records with values in column "column" between "begin" and "end" as a list
     # returns None if no rid found
     """
     def locate_range(self, begin, end, column):
-        return self.search_all(self.indices[column], begin, end) 
+        return self.search_all_rid(self.indices[column], begin, end) 
 
     """
     # optional: Create index on specific column
@@ -49,7 +49,7 @@ class Index:
     """
     # Search through values in the 2 tuple and returns all rid corresponds to the value
     """
-    def search_all(self, column, begin, end):
+    def search_all_rid(self, column, begin, end):
         low = 0
         high = len(column) - 1
         rids = []
@@ -90,7 +90,7 @@ class Index:
     # Update new RID for all indices when a record is updated
     """
     def update_all_indices(self, primary_key, *columns):
-        rid = self.search_all(self.indices[self.key], primary_key, primary_key)
+        rid = self.search_all_rid(self.indices[self.key], primary_key, primary_key)
         if not rid:
             raise ValueError(f"Cannot update indices. Key: {primary_key} not found!")
         for i in range(0, self.num_columns):
@@ -104,7 +104,7 @@ class Index:
     # Columns are inserted in a tuple(rid, column value)
     """
     def insert_in_all_indices(self, *columns):
-        rid = self.search_all(self.indices[self.key], columns[NUM_HIDDEN_COLUMNS + self.key], columns[NUM_HIDDEN_COLUMNS + self.key])
+        rid = self.search_all_rid(self.indices[self.key], columns[NUM_HIDDEN_COLUMNS + self.key], columns[NUM_HIDDEN_COLUMNS + self.key])
         if rid != None:
             raise ValueError(f"Column with key: {columns[NUM_HIDDEN_COLUMNS + self.key]} already exists.")
         for i in range(NUM_HIDDEN_COLUMNS, len(columns)):
@@ -115,7 +115,7 @@ class Index:
     # Remove element associated with rid : primary key from all indices
     """
     def delete_from_all_indices(self, primary_key):
-        rid = self.search_all(self.indices[self.key], primary_key, primary_key)
+        rid = self.search_all_rid(self.indices[self.key], primary_key, primary_key)
         if not rid:
             raise ValueError(f"Cannot delete from indices. Key: {primary_key} not found!")
         for i in range(0, self.num_columns):

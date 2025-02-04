@@ -33,10 +33,16 @@ index.insert_in_all_indices(*r3)
 # Should raise error for inserting same key more than once
 # index.insert_in_all_indices(*r1)
 
+rid = index.locate(2, "Alice")
+print(f"Value Alice RID: {rid}")
+
 rid = index.locate(table.key, 101)
 print(f"Key 101 RID: {rid}")
 rid = index.locate_range(102, 103, table.key)
 print(f"Key 102-103 RID: {rid}")
+
+rid = index.locate_range("Alice", "Charlie", 2)
+print(f"Alice to Charlie RID: {rid}")
 
 # Should return None since key 200 doesn't exist
 rid = index.locate(table.key, 200)
@@ -56,6 +62,9 @@ index.update_all_indices(r5[NUM_HIDDEN_COLUMNS + table.key], *r5)
 
 rid = index.locate(table.key, 103)
 print(f"Updated again key 103 RID: {rid}")
+
+rid = index.locate_range("Alice", "Charlie", 2)
+print(f"Updated Alice to Charlie RID: {rid}")
 
 r6 = [0,6,0,0,record6.rid, record6.key, record6.columns[0], record6.columns[1], record6.columns[2]]
 index.insert_in_all_indices(*r6)
