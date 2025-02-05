@@ -107,16 +107,16 @@ class Query:
         self.table.page_directory[new_record.rid] = [None] * self.table.total_num_columns
 
         # Write new record into tail pages (Incorporated this part from update_record() in table.py)
-        self.__write_record_to_tail_pages(new_record)
+        self.__writeTailRecord(new_record)
 
         # Updates the indirection column on the base page for new tail page
         page_index, page_slot = self.table.page_directory[rid_location]
         self.table.base_pages[page_index].write_precise(page_slot, new_record.rid)
 
         # Update indirection ptr chain
-        self.__update_indirection_chain(rid_location, new_record.rid)
+        self.__updateIndirectionChain(rid_location, new_record.rid)
 
-        self.__update_indices(rid_location, columns)
+        self.__updateIndices(rid_location, columns)
 
         # Update successful
         return True
@@ -166,7 +166,7 @@ class Query:
 
 
     """Helper function that writes the new record into the appropriate tail pages."""
-    def __write_record_to_tail_pages(self, new_record):
+    def __writeTailRecord(self, new_record):
         for i in range(self.table.total_num_columns):
             if(new_record.columns[i] is None):
                 continue
@@ -187,7 +187,7 @@ class Query:
 
 
     """Helper function to update the indirection pointer chain for an update."""
-    def __update_indirection_chain(self, base_rid, new_rid):
+    def __updateIndirectionChain(self, base_rid, new_rid):
     
         
         base_page_index, base_page_slot = self.table.page_directory[base_rid][0]
@@ -215,7 +215,7 @@ class Query:
     
 
     """Helper function to update the indices for any updated columns."""
-    def __update_indices(self, base_rid, columns):
+    def __updateIndices(self, base_rid, columns):
         
         # For every updated column w/ an index, overwrite old mapping with new
         for i in range(self.table.num_columns):
