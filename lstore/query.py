@@ -1,5 +1,6 @@
 from lstore.table import Table, Record
 from lstore.index import Index
+from lstore.config import *
 
 
 class Query:
@@ -49,22 +50,25 @@ class Query:
             rid_list = self.table.index.locate(search_key_index, search_key)
 
             if not rid_list:
-                return False
+                return False  # No matching base records found
 
             record_objs = []
 
             for rid in rid_list:
-                record = self.table.page_directory.get(rid, None)
-                if record is None:
-                    continue
+                base_page_location = self.table.page_directory.get(rid, None)
+                if base_page_location is None:
+                    continue  # Skip if no base page location is found
 
-                projected_columns = []
-                for i in range(len(projected_columns_index)):
-                    if projected_columns_index[i] == 1:
-                        projected_columns.append(record.columns[i])
-                    else:
-                        projected_columns.append(None)
-                record_objs.append(Record(record.rid, record.key, projected_columns))
+                base_page_index, base_page_slot = base_page_location[0]
+
+                projected_columns = [
+                    self.table.base_pages[i][base_page_index].get(base_page_slot)
+                    if projected_columns_index[i] == 1 else None # else statement here could be redundant if we decide to skip non-projected columns rather
+                                                                 # than appending None
+                    for i in range(len(projected_columns_index))
+                ]
+                record_objs.append(Record(rid, search_key, projected_columns)) # We can also just return projected_columns if we don't need
+                                                                               # the rid and search_key associated with it (this is done in select_version)
 
             return record_objs if record_objs else False
         
@@ -84,7 +88,55 @@ class Query:
     # Assume that select will never be called on a key that doesn't exist
     """
     def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
-        pass
+        try:
+            rid_list = self.table.index.locate(search_key_index, search_key)
+
+            if not rid_list:
+                return False  # No matching base records found
+
+            record_objs = []
+
+            for rid in rid_list:
+                base_page_location = self.table.page_directory.get(rid, None)
+                if base_page_location is None:
+                    continue  # Skip if no base page location is found
+
+                base_page_index, base_page_slot = base_page_location[0]
+
+                # Handle projection directly from base page if relative_version == 0
+                # Same logic as in select except we directly append projected_columns rather than a Record object
+                if relative_version == 0:
+                    projected_columns = [
+                        self.table.base_pages[i][base_page_index].get(base_page_slot)
+                        if projected_columns_index[i] == 1 else None
+                        for i in range(len(projected_columns_index))
+                    ]
+                    record_objs.append(projected_columns) 
+                    continue
+
+                # Retrieve the initial indirection RID and traverse versions
+                indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][base_page_index].get(base_page_slot)
+                current_rid = rid
+
+                # Iterate and update current_rid to newer tail versions (via indirection_rid) "relative_version" times
+                for _ in range(relative_version):
+                    if indirection_rid == current_rid:  # No older version available
+                        return False
+                    current_rid = indirection_rid
+                    indirection_rid = self.table.__grab_tail_value_from_rid(current_rid, INDIRECTION_COLUMN)
+
+                # Retrieve and project the selected columns, given that current_rid is now at the correct version
+                projected_columns = [
+                    self.table.__grab_tail_value_from_rid(current_rid, i) if projected_columns_index[i] == 1 else None
+                    for i in range(len(projected_columns_index))
+                ]
+                record_objs.append(projected_columns)
+
+            return record_objs if record_objs else False
+
+        except Exception as e:
+            print(f"Error during select_version: {e}")
+            return False
 
     
     """
