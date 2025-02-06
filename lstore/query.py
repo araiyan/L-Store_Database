@@ -103,7 +103,7 @@ class Query:
 
         # Update indirection ptr chain & indices
         self.__updateIndirectionChain(rid_location, new_record.rid)
-        self.table.index.update_all_indices(rid_location, columns)
+        self.__updateIndices(rid_location, columns)
 
         # Update successful
         return True
@@ -201,6 +201,33 @@ class Query:
             
             cons_page_index, cons_page_slot = self.table.page_directory[cons_rid][0]
             self.table.base_pages[INDIRECTION_COLUMN][cons_page_index].write_precise(cons_page_slot, new_rid)
+
+    
+
+    """Helper function to update the indices for any updated columns."""
+    def __updateIndices(self, base_rid, columns):
+        
+        # For every updated column w/ an index, overwrite old mapping with new
+        for i in range(self.table.num_columns):
+            
+            # Skip if update value for this column is None or if we're going over primary key's column
+            if(columns[i] is None):
+                continue
+
+            # Check if an index exists for column i
+            if(i in self.table.index.indices):
+                old_val = self.__getLatestColumnValue(base_rid, NUM_HIDDEN_COLUMNS + i)
+                new_val = columns[i]
+
+                # No point updating if value unchanged
+                if(old_val == new_val):
+                    continue
+
+                # Remove old mapping and insert the new one?
+                self.table.index.indices[i].delete(old_val, base_rid)
+                self.table.index.indices[i].insert(new_val, base_rid)
+
+    
 
     """
     Given the base record's RID and a column number,
