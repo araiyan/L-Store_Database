@@ -69,7 +69,7 @@ class Query:
         """
     # Update a record with specified key and columns
     # Returns True if update is succesful
-    # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking
+    # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking (Ignore this for now)
     """
     def update(self, primary_key, *columns):
 
@@ -91,19 +91,22 @@ class Query:
             
             new_columns[NUM_HIDDEN_COLUMNS + i] = value
 
+        prev_tail_rid = self.__getLatestTailRid(rid_location)
+        new_columns[INDIRECTION_COLUMN] = prev_tail_rid
+
         # Create new record and initialize it into the pd
         new_record = Record(rid = -1, key = primary_key, columns = new_columns)
         self.table.assign_rid_to_record(new_record)
         self.table.page_directory[new_record.rid] = [None] * self.table.total_num_columns
         self.__writeTailRecord(new_record)
 
+
         # Updates the indirection column on the base page for new tail page
         page_index, page_slot = self.table.page_directory[rid_location]
         self.table.base_pages[page_index].write_precise(page_slot, new_record.rid)
 
-        # Update indirection ptr chain & indices
-        self.__updateIndirectionChain(rid_location, new_record.rid)
-        self.__updateIndices(rid_location, columns)
+        # Update indices
+        self.table.index.update_all_indices(primary_key, *new_columns)
 
         # Update successful
         return True
@@ -151,6 +154,28 @@ class Query:
         return False
     
 
+    """
+    Starting from the base record’s indirection pointer, we want to go through all the 
+    base/consolidated records. Iterate through with until the column_page_locations tuple
+    is greater than 1, signifying the end of the base/consolidated records
+    """
+    def __getLatestTailRid(self, base_rid):
+
+        # Get the base record's indirection pointer from the base page
+        base_page_index, base_page_slot = self.table.page_directory[base_rid][INDIRECTION_COLUMN]
+        indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][base_page_index].get(base_page_slot)
+
+        column_page_locations = self.table.page_directory[indirection_rid]
+
+        # Walk through consolidated pages
+        while(indirection_rid != base_rid and len(column_page_locations) == 1):
+            
+            page_index, page_slot = column_page_locations[0]
+            indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][page_index].get(page_slot)
+            column_page_locations = self.table.page_directory[indirection_rid]
+
+        return indirection_rid
+    
 
     """Helper function that writes the new record into the appropriate tail pages."""
     def __writeTailRecord(self, new_record):
@@ -165,97 +190,10 @@ class Query:
             if(not self.table.tail_pages[i][-1].has_capacity()):
                 self.table.tail_pages[i].append(Page())
 
+
             curr_page: Page = self.table.tail_pages[i][-1]
-            curr_page.write(new_record.columns[i])
-            page_index = curr_page.num_records  
-
-            # Update page directory for the new record
-            # TODO: Kind of a hack way of doing it. Need to improve indexing updated columns once pages is solidified
-            self.table.page_directory[new_record.rid][i] = [len(self.table.tail_pages[i]) - 1, page_index]
-    
-
-
-    """Helper function to update the indirection pointer chain for an update."""
-    def __updateIndirectionChain(self, base_rid, new_rid):
-    
-        base_page_index, base_page_slot = self.table.page_directory[base_rid][0]
-        current_indirection = self.table.base_pages[INDIRECTION_COLUMN][base_page_index].get(base_page_slot)
-
-        # If no prior update, update the base record's pointer
-        if(current_indirection == base_rid):
-            self.table.base_pages[INDIRECTION_COLUMN][base_page_index].write_precise(base_page_slot, new_rid)
-        
-        # Walk the chain until the end or until the condition is met
-        else:
-            cons_rid = current_indirection
             
-            
-            while(True):
-                cons_page_index, cons_page_slot = self.table.page_directory[cons_rid][0]
-                next_indirection = self.table.base_pages[INDIRECTION_COLUMN][cons_page_index].get(cons_page_slot)
-                
-                if(next_indirection == base_rid or next_indirection is None):
-                    break
-                
-                cons_rid = next_indirection
-            
-            cons_page_index, cons_page_slot = self.table.page_directory[cons_rid][0]
-            self.table.base_pages[INDIRECTION_COLUMN][cons_page_index].write_precise(cons_page_slot, new_rid)
+            pos = curr_page.write(new_record.columns[i])
+            tail_page_index = len(self.table.tail_pages[i]) - 1
 
-    
-
-    """Helper function to update the indices for any updated columns."""
-    def __updateIndices(self, base_rid, columns):
-        
-        # For every updated column w/ an index, overwrite old mapping with new
-        for i in range(self.table.num_columns):
-            
-            # Skip if update value for this column is None or if we're going over primary key's column
-            if(columns[i] is None):
-                continue
-
-            # Check if an index exists for column i
-            if(i in self.table.index.indices):
-                old_val = self.__getLatestColumnValue(base_rid, NUM_HIDDEN_COLUMNS + i)
-                new_val = columns[i]
-
-                # No point updating if value unchanged
-                if(old_val == new_val):
-                    continue
-
-                # Remove old mapping and insert the new one?
-                self.table.index.indices[i].delete(old_val, base_rid)
-                self.table.index.indices[i].insert(new_val, base_rid)
-
-    
-
-    """
-    Given the base record's RID and a column number,
-    traverse indirection chain to find last updated value
-    for that column
-        
-    Returns the latest value found. If no tail record updated this column,
-    returns the base record's value
-    """
-    def __getLatestColumnValue(self, rid_location, col):
-        
-        # I think my mistake here was that I originally deleted the base record call for indirection column so I was just doing self.table.page_directory[rid_location][INDIRECITON_COLUMN]?
-        # Would col be an issue here if the update() function checks if the column is None and skips if it is?
-        
-        base_page_index, base_page_slot = self.table.page_directory[rid_location][col]
-        indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][base_page_index].get(base_page_slot)
-        pd_entry = self.table.page_directory[indirection_rid]
-
-                
-        # Walk the update chain using a loop that exits once we find the latest non-consolidated record and we're not the base record
-        while(indirection_rid != rid_location and len(pd_entry) == 1):
-            
-            rec_page_index, rec_page_slot = pd_entry[0]
-            indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][rec_page_index].get(rec_page_slot)
-            pd_entry = self.table.page_directory[indirection_rid]
-                
-
-        # Use location stored for the specific column and return
-        record_loc = pd_entry[col]
-        rec_page_index, rec_page_slot = record_loc
-        return self.table.tail_pages[col][rec_page_index].get(rec_page_slot)
+            self.table.page_directory[new_record.rid][i] = (tail_page_index, pos)
