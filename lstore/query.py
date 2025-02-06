@@ -75,13 +75,8 @@ class Query:
 
         # We want to see if the record exists with the specified key; no point in continuing further without checking
         rid_location = self.table.index.locate(self.table.key, primary_key)
-        if(rid_location is None):
+        if(rid_location is None or len(columns) != self.table.num_columns):
             return False
-        
-        # Checking if we're passing the right number of values over to columns (one value per column, not more not less)
-        if(len(columns) != self.table.num_columns):
-            return False
-
 
         # The tail should have the same number of columns as the other pages so we should be multiplying by the total_num_columns value
         # Multiplying by [None] atm since the columns don't have an assigned size
@@ -94,29 +89,21 @@ class Query:
             if(i == self.table.key and value != primary_key):
                 return False
             
-            # We want to skip past the hidden columns since those shouldn't be touched
             new_columns[NUM_HIDDEN_COLUMNS + i] = value
 
-        # Finally makes a new record tail page using the values created in this function. Records class will be used to update in update_record()
+        # Create new record and initialize it into the pd
         new_record = Record(rid = -1, key = primary_key, columns = new_columns)
-
-        # Assign RID for newly created tail record
         self.table.assign_rid_to_record(new_record)
-
-        # Initialize record entry into directory
         self.table.page_directory[new_record.rid] = [None] * self.table.total_num_columns
-
-        # Write new record into tail pages (Incorporated this part from update_record() in table.py)
         self.__writeTailRecord(new_record)
 
         # Updates the indirection column on the base page for new tail page
         page_index, page_slot = self.table.page_directory[rid_location]
         self.table.base_pages[page_index].write_precise(page_slot, new_record.rid)
 
-        # Update indirection ptr chain
+        # Update indirection ptr chain & indices
         self.__updateIndirectionChain(rid_location, new_record.rid)
-
-        self.__updateIndices(rid_location, columns)
+        self.table.index.update_all_indices(rid_location, columns)
 
         # Update successful
         return True
@@ -167,7 +154,10 @@ class Query:
 
     """Helper function that writes the new record into the appropriate tail pages."""
     def __writeTailRecord(self, new_record):
+
         for i in range(self.table.total_num_columns):
+            
+            # Skip columns we're not updating
             if(new_record.columns[i] is None):
                 continue
 
@@ -179,7 +169,6 @@ class Query:
             curr_page.write(new_record.columns[i])
             page_index = curr_page.num_records  
 
-
             # Update page directory for the new record
             # TODO: Kind of a hack way of doing it. Need to improve indexing updated columns once pages is solidified
             self.table.page_directory[new_record.rid][i] = [len(self.table.tail_pages[i]) - 1, page_index]
@@ -189,7 +178,6 @@ class Query:
     """Helper function to update the indirection pointer chain for an update."""
     def __updateIndirectionChain(self, base_rid, new_rid):
     
-        
         base_page_index, base_page_slot = self.table.page_directory[base_rid][0]
         current_indirection = self.table.base_pages[INDIRECTION_COLUMN][base_page_index].get(base_page_slot)
 
@@ -200,6 +188,8 @@ class Query:
         # Walk the chain until the end or until the condition is met
         else:
             cons_rid = current_indirection
+            
+            
             while(True):
                 cons_page_index, cons_page_slot = self.table.page_directory[cons_rid][0]
                 next_indirection = self.table.base_pages[INDIRECTION_COLUMN][cons_page_index].get(cons_page_slot)
@@ -212,33 +202,6 @@ class Query:
             cons_page_index, cons_page_slot = self.table.page_directory[cons_rid][0]
             self.table.base_pages[INDIRECTION_COLUMN][cons_page_index].write_precise(cons_page_slot, new_rid)
 
-    
-
-    """Helper function to update the indices for any updated columns."""
-    def __updateIndices(self, base_rid, columns):
-        
-        # For every updated column w/ an index, overwrite old mapping with new
-        for i in range(self.table.num_columns):
-            
-            # Skip if update value for this column is None or if we're going over primary key's column
-            if(columns[i] is None):
-                continue
-
-            # Check if an index exists for column i
-            if(i in self.table.index.indices):
-                old_val = self.__getLatestColumnValue(base_rid, NUM_HIDDEN_COLUMNS + i)
-                new_val = columns[i]
-
-                # No point updating if value unchanged
-                if(old_val == new_val):
-                    continue
-
-                # Remove old mapping and insert the new one?
-                self.table.index.indices[i].delete(old_val, base_rid)
-                self.table.index.indices[i].insert(new_val, base_rid)
-
-    
-
     """
     Given the base record's RID and a column number,
     traverse indirection chain to find last updated value
@@ -248,7 +211,6 @@ class Query:
     returns the base record's value
     """
     def __getLatestColumnValue(self, rid_location, col):
-        
         
         # I think my mistake here was that I originally deleted the base record call for indirection column so I was just doing self.table.page_directory[rid_location][INDIRECITON_COLUMN]?
         # Would col be an issue here if the update() function checks if the column is None and skips if it is?
