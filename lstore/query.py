@@ -47,28 +47,45 @@ class Query:
     """
     def select(self, search_key, search_key_index, projected_columns_index):
         try:
+            # retrieve a list of RIDs that contain the "search_key" value within the column as defined by "search_key_index"
             rid_list = self.table.index.locate(search_key_index, search_key)
 
+            # if there exists no RIDs that match the given parameters, return False
             if not rid_list:
-                return False  # No matching base records found
+                return False
 
             record_objs = []
 
+            # iterate through all desired RIDs
             for rid in rid_list:
                 base_page_location = self.table.page_directory.get(rid, None)
                 if base_page_location is None:
-                    continue  # Skip if no base page location is found
+                    continue
+                    
+                # store the (base) page# and index# that the RID/row is located
+                base_page_number, base_page_index = base_page_location[0]
 
-                base_page_index, base_page_slot = base_page_location[0]
-
-                projected_columns = [
-                    self.table.base_pages[i][base_page_index].get(base_page_slot)
-                    if projected_columns_index[i] == 1 else None # else statement here could be redundant if we decide to skip non-projected columns rather
-                                                                 # than appending None
-                    for i in range(len(projected_columns_index))
+                # store base values within projected columns - we will update values with latest data as necessary 
+                record_columns = [
+                    self.table.base_pages[NUM_HIDDEN_COLUMNS + i][base_page_number].get(base_page_index)
+                    for i in range(len(projected_columns_index)) if projected_columns_index[i] == 1
                 ]
-                record_objs.append(Record(rid, search_key, projected_columns)) # We can also just return projected_columns if we don't need
-                                                                               # the rid and search_key associated with it (this is done in select_version)
+
+                # retrieve indirection RID so that we can traverse through updated pages/records
+                indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][base_page_number].get(base_page_index)
+
+                while indirection_rid != rid:
+                    # grab schema encoding value to determine whether or not a given column within a tail record was updated
+                    schema_encoding = self.table.__grab_tail_value_from_rid(indirection_rid, SCHEMA_ENCODING_COLUMN)
+                    
+                    for i in range(len(projected_columns_index)):
+                        if projected_columns_index[i] == 1 and ((schema_encoding >> i) & 1) == 1:
+                            record_columns[i] = self.table.__grab_tail_value_from_rid(indirection_rid, NUM_HIDDEN_COLUMNS + i) 
+                        
+                        # update indirection_rid to the next within chain of tail records
+                        indirection_rid = self.table.__grab_tail_value_from_rid(indirection_rid, INDIRECTION_COLUMN)
+
+                record_objs.append(Record(rid, search_key, record_columns))
 
             return record_objs if record_objs else False
         
@@ -101,13 +118,13 @@ class Query:
                 if base_page_location is None:
                     continue  # Skip if no base page location is found
 
-                base_page_index, base_page_slot = base_page_location[0]
+                base_page_number, base_page_index = base_page_location[0]
 
                 # Handle projection directly from base page if relative_version == 0
                 # Same logic as in select except we directly append projected_columns rather than a Record object
                 if relative_version == 0:
                     projected_columns = [
-                        self.table.base_pages[i][base_page_index].get(base_page_slot)
+                        self.table.base_pages[NUM_HIDDEN_COLUMNS + i][base_page_number].get(base_page_index)
                         if projected_columns_index[i] == 1 else None
                         for i in range(len(projected_columns_index))
                     ]
