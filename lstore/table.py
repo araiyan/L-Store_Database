@@ -1,250 +1,199 @@
+from lstore.table import Table, Record
 from lstore.index import Index
 from lstore.page import Page
-from time import time
-from lstore.config import *
+from lstore.config import NUM_HIDDEN_COLUMNS
+from lstore.config import INDIRECTION_COLUMN
 
-class Record:
 
-    def __init__(self, rid, key, columns):
-        self.rid = rid
-        self.key = key
-        self.columns = columns
-        '''Each record contains both the hidden columns and the given columns [...HIDDEN_COLUMNS, ...GIVEN_COLUMNS]'''
 
-    def __str__(self):
-        return f"RID: {self.rid} Key: {self.key} \nColumns: {self.columns}"
-
-class Table:
-
+class Query:
     """
-    :param name: string         #Table name
-    :param num_columns: int     #Number of Columns: all columns are integer
-    :param key: int             #Index of table key in columns
+    # Creates a Query object that can perform different queries on the specified table 
+    Queries that fail must return False
+    Queries that succeed should return the result or True
+    Any query that crashes (due to exceptions) should return False
     """
-    def __init__(self, name, num_columns, key):
-        if (key < 0 or key >= num_columns):
-            raise ValueError("Error Creating Table! Primary Key must be within the columns of the table")
-
-        self.name = name
-        self.key = key
-        self.num_columns = num_columns
-        self.total_num_columns = num_columns + NUM_HIDDEN_COLUMNS
-        self.page_directory = {}
-        self.index = Index(self)
-        
-        self.base_pages = {}
-        self.tail_pages = {}
-        self.tail_pages_prev_merge = [0] * self.num_columns
-        '''Keeps track of the number of tail pages that have been merged'''
-
-        # The table should handle assigning RIDs
-        self.rid_index = 0
-
-        for i in range(self.total_num_columns):
-            self.base_pages[i] = [Page()]
-            self.tail_pages[i] = [Page()]
-
-    def assign_rid_to_record(self, record: Record):
-        '''Use this function to assign a record's RID'''
-        
-        record.rid = self.rid_index
-        self.rid_index += 1
-
-    def insert_record(self, record: Record):
-        if (self.index.locate(self.key, record.columns[NUM_HIDDEN_COLUMNS + self.key])):
-            raise ValueError("Error inserting record to table! Duplicate primary key found")
-        
-        for i in range(self.total_num_columns):
-            if (not self.base_pages[i][-1].has_capacity()):
-                self.base_pages[i].append(Page())
-
-            # Points to the last page in the list of pages for the current column
-            curr_page:Page = self.base_pages[i][-1] 
-
-            page_index = curr_page.num_records
-            curr_page.write(record.columns[i])
-            
-
-            # Each directory entry contains the page# and the index# within that page
-            # Note: Subject to change if each column's data isn't an integer
-            if (i == RID_COLUMN):
-                self.page_directory[record.rid] = [(len(self.base_pages[i]) - 1, page_index)]
-
-        # TODO: Query Insert should implement this
+    def __init__(self, table):
+        self.table:Table = table
         pass
 
-    def update_record(self, record: Record):
-        origin_rid = self.index.locate(self.key, record.columns[NUM_HIDDEN_COLUMNS + self.key])
+    
+    """
+    # internal Method
+    # Read a record with specified RID
+    # Returns True upon succesful deletion
+    # Return False if record doesn't exist or is locked due to 2PL
+    """
+    def delete(self, primary_key):
+        pass
+    
+    
+    """
+    # Insert a record with specified columns
+    # Return True upon succesful insertion
+    # Returns False if insert fails for whatever reason
+    """
+    def insert(self, *columns):
+        schema_encoding = '0' * self.table.num_columns
+        # Note: Ensure schema_encoding is converted to int before inserted into record.column
+        pass
 
-        if (origin_rid is None):
-            raise ValueError("Error updating record! Record with primary key does not exist")
-        
-        for i in range(self.total_num_columns):
-            if (record.columns[i] is None):
+    
+    """
+    # Read matching record with specified search key
+    # :param search_key: the value you want to search based on
+    # :param search_key_index: the column index you want to search based on
+    # :param projected_columns_index: what columns to return. array of 1 or 0 values.
+    # Returns a list of Record objects upon success
+    # Returns False if record locked by TPL
+    # Assume that select will never be called on a key that doesn't exist
+    """
+    def select(self, search_key, search_key_index, projected_columns_index):
+        pass
+
+    
+    """
+    # Read matching record with specified search key
+    # :param search_key: the value you want to search based on
+    # :param search_key_index: the column index you want to search based on
+    # :param projected_columns_index: what columns to return. array of 1 or 0 values.
+    # :param relative_version: the relative version of the record you need to retreive.
+    # Returns a list of Record objects upon success
+    # Returns False if record locked by TPL
+    # Assume that select will never be called on a key that doesn't exist
+    """
+    def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
+        pass
+
+    
+        """
+    # Update a record with specified key and columns
+    # Returns True if update is succesful
+    # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking (Ignore this for now)
+    """
+    def update(self, primary_key, *columns):
+
+        # We want to see if the record exists with the specified key; no point in continuing further without checking
+        rid_location = self.table.index.locate(self.table.key, primary_key)
+        if(rid_location is None or len(columns) != self.table.num_columns):
+            return False
+
+        # The tail should have the same number of columns as the other pages so we should be multiplying by the total_num_columns value
+        # Multiplying by [None] atm since the columns don't have an assigned size
+        new_columns = [None] * self.table.total_num_columns
+
+        # Insert values into the new column
+        for i, value in enumerate(columns):
+
+            # If we're modifying the primary_key then this update should be stopped since we can't change the primary_key column
+            if(i == self.table.key and value != primary_key):
+                return False
+            
+            new_columns[NUM_HIDDEN_COLUMNS + i] = value
+
+        prev_tail_rid = self.__getLatestTailRid(rid_location)
+        new_columns[INDIRECTION_COLUMN] = prev_tail_rid
+
+        # Create new record and initialize it into the pd
+        new_record = Record(rid = -1, key = primary_key, columns = new_columns)
+        self.table.assign_rid_to_record(new_record)
+        self.table.page_directory[new_record.rid] = [None] * self.table.total_num_columns
+        self.__writeTailRecord(new_record)
+
+
+        # Updates the indirection column on the base page for new tail page
+        page_index, page_slot = self.table.page_directory[rid_location]
+        self.table.base_pages[page_index].write_precise(page_slot, new_record.rid)
+
+        # Update indices
+        self.table.index.update_all_indices(primary_key, *new_columns)
+
+        # Update successful
+        return True
+    
+    """
+    :param start_range: int         # Start of the key range to aggregate 
+    :param end_range: int           # End of the key range to aggregate 
+    :param aggregate_columns: int  # Index of desired column to aggregate
+    # this function is only called on the primary key.
+    # Returns the summation of the given range upon success
+    # Returns False if no record exists in the given range
+    """
+    def sum(self, start_range, end_range, aggregate_column_index):
+        pass
+
+    
+    """
+    :param start_range: int         # Start of the key range to aggregate 
+    :param end_range: int           # End of the key range to aggregate 
+    :param aggregate_columns: int  # Index of desired column to aggregate
+    :param relative_version: the relative version of the record you need to retreive.
+    # this function is only called on the primary key.
+    # Returns the summation of the given range upon success
+    # Returns False if no record exists in the given range
+    """
+    def sum_version(self, start_range, end_range, aggregate_column_index, relative_version):
+        pass
+
+    
+    """
+    Increments one column of the record
+    this implementation should work if your select and update queries already work
+    :param key: the primary of key of the record to increment
+    :param column: the column to increment
+    # Returns True is increment is successful
+    # Returns False if no record matches key or if target record is locked by 2PL.
+    """
+    def increment(self, key, column):
+        r = self.select(key, self.table.key, [1] * self.table.num_columns)[0]
+        if r is not False:
+            updated_columns = [None] * self.table.num_columns
+            updated_columns[column] = r[column] + 1
+            u = self.update(key, *updated_columns)
+            return u
+        return False
+    
+
+    """
+    Starting from the base record’s indirection pointer, we want to go through all the 
+    base/consolidated records. Iterate through with until the column_page_locations tuple
+    is greater than 1, signifying the end of the base/consolidated records
+    """
+    def __getLatestTailRid(self, base_rid):
+
+        # Get the base record's indirection pointer from the base page
+        base_page_index, base_page_slot = self.table.page_directory[base_rid][INDIRECTION_COLUMN]
+        indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][base_page_index].get(base_page_slot)
+
+        column_page_locations = self.table.page_directory[indirection_rid]
+
+        # Walk through consolidated pages
+        while(indirection_rid != base_rid and len(column_page_locations) == 1):
+            
+            page_index, page_slot = column_page_locations[0]
+            indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][page_index].get(page_slot)
+            column_page_locations = self.table.page_directory[indirection_rid]
+
+        return indirection_rid
+    
+
+    """Helper function that writes the new record into the appropriate tail pages."""
+    def __writeTailRecord(self, new_record):
+
+        for i in range(self.table.total_num_columns):
+            
+            # Skip columns we're not updating
+            if(new_record.columns[i] is None):
                 continue
 
-            if (not self.tail_pages[i][-1].has_capacity()):
-                self.tail_pages[i].append(Page())
-
-            curr_page:Page = self.tail_pages[i][-1]
-
-            curr_page.write(record.columns[i])
-            page_index = curr_page.num_records
-
-            # TODO: Kind of a hack way of doing it. Need to improve indexing updated columns once pages is solidified
-            self.page_directory[record.rid][i] = [len(self.tail_pages[i]) - 1, page_index]
-
-        # updates the indirection column on the base page for new tail page
-        page_index, page_slot = self.page_directory[origin_rid]
-        self.base_pages[page_index].write_precise(page_slot, record.rid)
-
-        # TODO: Query update should implement this
+            # If current tail page is full, append a new page
+            if(not self.table.tail_pages[i][-1].has_capacity()):
+                self.table.tail_pages[i].append(Page())
 
 
-    def get_record(self, record_primary_key) -> Record:
-        '''Grab the most updated record on the table with matching primary key'''
-        origin_rid = self.index.locate(self.key, record_primary_key)
-        if (origin_rid is None):
-            raise ValueError("Error getting record! Record with the given primary key does not exist")
-
-        page_index, page_slot = self.page_directory[origin_rid]
-        record_columns = []
-
-        # Crafting the base page record
-        for i in range(self.total_num_columns):
-            column_value = self.base_pages[i][page_index].get(page_slot)
-            record_columns.append(column_value)
-
-        indirection_rid = record_columns[INDIRECTION_COLUMN]
-
-        # when we have the most updated records records_fill_schema will look like 11111... in binary
-        record_fill_schema = 0
-        record_fill_max_schema = (2 ** self.num_columns) - 1
-
-        while (indirection_rid != origin_rid and record_fill_schema < record_fill_max_schema):
-            record_schema = self.__grab_tail_value_from_rid(indirection_rid, SCHEMA_ENCODING_COLUMN)
-            for i in range(NUM_HIDDEN_COLUMNS, self.total_num_columns):
-                # if the record has not been filled
-                if (((record_fill_schema >> i) & 1) == 0):
-                    # checks schema from last to first going right to left
-                    update_bit = (record_schema >> i) & 1
-
-                    if (update_bit):
-                        record_fill_schema += (1 << i)
-                        record_columns[i] = self.__grab_tail_value_from_rid(indirection_rid, i)
-
-            indirection_rid = self.__grab_tail_value_from_rid(indirection_rid, INDIRECTION_COLUMN)
-
-        return Record(origin_rid, self.key, record_columns)
-        
-    def __grab_tail_value_from_rid(self, rid, column, base_page=False):
-        '''Given a records rid and column number this function returns tail page value in that specific physical location'''
-        page_index, page_slot = self.page_directory[rid][column]
-        if (base_page):
-            return self.base_pages[column][page_index].get(page_slot)
-        return self.tail_pages[column][page_index].get(page_slot)
-    
-    def __grab_tail_value_from_page_location(self, column, tail_page_location):
-        '''Given a tuple of page index and page slot return the value in the tail page of the specific column'''
-        return self.tail_pages[column][tail_page_location[0]][tail_page_location[1]]
-    
-    
-    def __merge(self):
-        print("Merge is happening")
-
-        # Here were using rid column because it will always get filled out first
-        if (len(self.tail_pages[RID_COLUMN]) - self.tail_pages_prev_merge[RID_COLUMN]) < MAX_TAIL_PAGES_BEFORE_MERGING:
-            return False
+            curr_page: Page = self.table.tail_pages[i][-1]
             
-        # Grabs all records rid
-        # TODO: If each indicy is a binary tree we need to iterate through the binary tree and grab all rids
-        all_rids = self.index.indices[self.key].grab_all()
+            pos = curr_page.write(new_record.columns[i])
+            tail_page_index = len(self.table.tail_pages[i]) - 1
 
-        # for each rid grab the most updated columns
-        for _, base_rid in enumerate(all_rids):
-            # get the base page of the record
-            page_index, page_slot = self.page_directory[base_rid][0]
-            print(f"Merge -> page index: {page_index} page slot: {page_slot}")
-
-            indirection_rid = self.base_pages[INDIRECTION_COLUMN][page_index].get(page_slot)
-            column_page_locations = self.page_directory[indirection_rid]
-
-            # iterate through all the consolidated pages
-            while (indirection_rid != base_rid and len(column_page_locations) == 1):
-                page_index, page_slot = column_page_locations[0]
-                indirection_rid = self.base_pages[INDIRECTION_COLUMN][page_index].get(page_slot)
-                column_page_locations = self.page_directory[indirection_rid]
-
-            # form our consolidated record
-            consolidated_record = Record(0, self.key, [0] * self.total_num_columns)
-            self.assign_rid_to_record(consolidated_record)
-
-            latest_base_page_index = page_index
-            latest_base_page_slot = page_slot
-
-            # have the consolidated indirection_rid point towards the latest tail record
-            consolidated_indirection_rid = indirection_rid
-
-            for i in range(self.num_columns):
-                consolidated_record.columns[NUM_HIDDEN_COLUMNS + i] = self.base_pages[i + NUM_HIDDEN_COLUMNS][page_index].get(page_slot)
-
-            consolidated_time_stamp = self.base_pages[TIMESTAMP_COLUMN][page_index].get(page_slot)
-
-            # when we have the most updated records records_fill_schema will look like 11111... in binary
-            record_fill_schema = (2 ** self.key) # flipping key schema bit since key is never updated
-            record_fill_max_schema = (2 ** self.num_columns) - 1
-
-            while (indirection_rid != base_rid and record_fill_schema < record_fill_max_schema):
-                column_page_locations = self.page_directory[indirection_rid]
-                if len(column_page_locations) < self.total_num_columns:
-                    raise ValueError("Error Inside Merge: could not locate tail page. Current page locations: ", column_page_locations)
-                
-                tail_page_time_stamp = self.__grab_tail_value_from_page_location(TIMESTAMP_COLUMN, column_page_locations[TIMESTAMP_COLUMN])
-
-                # if tail page is not updated we have the most updated data
-                if (tail_page_time_stamp < consolidated_time_stamp):
-                    break
-
-                tail_page_schema = self.__grab_tail_value_from_page_location(SCHEMA_ENCODING_COLUMN, column_page_locations[SCHEMA_ENCODING_COLUMN])
-
-                for i in range(self.num_columns):
-                    # if the record has not been filled
-                    if (((record_fill_schema >> i) & 1) == 0):
-                        # checks schema from last to first going right to left
-                        update_bit = (tail_page_schema >> i) & 1
-
-                        if (update_bit):
-                            record_fill_schema += (1 << i)
-                            consolidated_record.columns[-(i+1)] = self.__grab_tail_value_from_page_location(-(i+1), column_page_locations[-(i+1)])
-
-                indirection_rid = self.__grab_tail_value_from_page_location(INDIRECTION_COLUMN, column_page_locations[INDIRECTION_COLUMN])
-
-            
-            # Now we have the most consolidated record for the rid
-            consolidated_record.columns[INDIRECTION_COLUMN] = consolidated_indirection_rid
-            consolidated_record.columns[SCHEMA_ENCODING_COLUMN] = 0
-            consolidated_record.columns[RID_COLUMN] = consolidated_record.rid
-            consolidated_record.columns[TIMESTAMP_COLUMN] = time()
-
-            # Insert the consolidated column into a consolidated base page
-            for i in range(self.total_num_columns):
-                if (not self.base_pages[i][-1].has_capacity()):
-                    self.base_pages[i].append(Page())
-
-                # Points to the last page in the list of pages for the current column
-                curr_page:Page = self.base_pages[i][-1] 
-                curr_page.write(consolidated_record.columns[i])
-                
-
-                if (i == RID_COLUMN):
-                    self.page_directory[consolidated_record.rid] = [(len(self.base_pages[i]) - 1, curr_page.num_records - 1)]
-
-            # have the base_page or latest consolidated_page point to the new consolidated record
-            self.base_pages[INDIRECTION_COLUMN][latest_base_page_index].write_precise(latest_base_page_slot, consolidated_record.rid)
-
-        # update the merged tails page index
-        for i in range(self.total_num_columns):
-            self.tail_pages_prev_merge[i] = len(self.tail_pages[i]) - 1
-        
-
- 
+            self.table.page_directory[new_record.rid][i] = (tail_page_index, pos)
