@@ -32,16 +32,18 @@ class Query:
     # Returns False if insert fails for whatever reason
     """
     def insert(self, *columns):
-        schema_encoding = '0' * self.table.num_columns
-
+        # check for invalid number of columns
+        if len(columns) != self.table.num_columns:
+            return False
+  
         record = Record(rid = None, key = self.table.key, columns = None)
         self.table.assign_rid_to_record(record)
 
         hidden_columns = [None] * NUM_HIDDEN_COLUMNS
-        hidden_columns[INDIRECTION_COLUMN] = -1 # how should we initialize indir?
+        hidden_columns[INDIRECTION_COLUMN] = record.rid
         hidden_columns[RID_COLUMN] = record.rid
         hidden_columns[TIMESTAMP_COLUMN] = int(time())
-        hidden_columns[SCHEMA_ENCODING_COLUMN] = int(schema_encoding)
+        hidden_columns[SCHEMA_ENCODING_COLUMN] = 0
         record.columns = hidden_columns + list(columns)
         
         self.table.insert_record(record)
