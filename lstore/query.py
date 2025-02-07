@@ -94,7 +94,7 @@ class Query:
         # Multiplying by [None] atm since the columns don't have an assigned size
         new_columns = [None] * self.table.total_num_columns
 
-        schema_encoding = ['0'] * self.table.num_columns
+        schema_encoding = 0
 
         # Insert values into the new column
         for i, value in enumerate(columns):
@@ -104,7 +104,7 @@ class Query:
                 return False
             
             if(value is not None):
-                schema_encoding[i] = '1'
+                schema_encoding |= (1 << i)
             
             new_columns[NUM_HIDDEN_COLUMNS + i] = value
 
@@ -114,7 +114,7 @@ class Query:
         prev_tail_rid = self.table.base_pages[INDIRECTION_COLUMN][cons_page_index].get(cons_page_slot)
         
         new_columns[INDIRECTION_COLUMN] = prev_tail_rid
-        new_columns[SCHEMA_ENCODING_COLUMN] = int(''.join(schema_encoding), 2) # Converting schema from binary to base10
+        new_columns[SCHEMA_ENCODING_COLUMN] = schema_encoding
         new_columns[TIMESTAMP_COLUMN] = int(time.time())
 
 
