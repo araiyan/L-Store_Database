@@ -94,6 +94,8 @@ class Query:
         # Multiplying by [None] atm since the columns don't have an assigned size
         new_columns = [None] * self.table.total_num_columns
 
+        schema_encoding = ['0'] * self.table.num_columns
+
         # Insert values into the new column
         for i, value in enumerate(columns):
 
@@ -101,20 +103,23 @@ class Query:
             if(i == self.table.key or value == primary_key):
                 return False
             
+            if(value is not None):
+                schema_encoding[i] = '1'
+            
             new_columns[NUM_HIDDEN_COLUMNS + i] = value
-
-        # schema = 0; schema += 2^i or bit shift schema += 1 << i
 
         # We want to set indirection for temp tail record to be the previous tail_rid --> go to base/cons to get latest
         cons_rid = self.__getLatestConRid(rid_location)
         cons_page_index, cons_page_slot = self.table.page_directory[cons_rid][0]
         prev_tail_rid = self.table.base_pages[INDIRECTION_COLUMN][cons_page_index].get(cons_page_slot)
+        
         new_columns[INDIRECTION_COLUMN] = prev_tail_rid
+        new_columns[SCHEMA_ENCODING_COLUMN] = int(''.join(schema_encoding), 2) # Converting schema from binary to base10
+        new_columns[TIMESTAMP_COLUMN] = int(time.time())
 
 
         # Create new record and initialize it into the pd
         new_record = Record(rid = -1, key = primary_key, columns = new_columns)
-
         self.table.assign_rid_to_record(new_record)
         self.table.page_directory[new_record.rid] = [None] * self.table.total_num_columns
         new_columns[RID_COLUMN] =  new_record.rid
@@ -122,7 +127,7 @@ class Query:
 
 
         # Updates the indirection column on the base/cons page for new tail page
-        page_index, page_slot = self.table.page_directory[cons_rid][INDIRECTION_COLUMN]
+        page_index, page_slot = self.table.page_directory[cons_rid][0]
         self.table.base_pages[INDIRECTION_COLUMN][page_index].write_precise(page_slot, new_record.rid)        
 
         # Update indices
