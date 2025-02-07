@@ -1,9 +1,7 @@
 from lstore.table import Table, Record
 from lstore.index import Index
 from lstore.page import Page
-from lstore.config import NUM_HIDDEN_COLUMNS
-from lstore.config import INDIRECTION_COLUMN
-
+from lstore.config import *
 
 
 class Query:
@@ -75,9 +73,9 @@ class Query:
 
         # We want to see if the record exists with the specified key; no point in continuing further without checking
         rid_location = self.table.index.locate(self.table.key, primary_key)
-        if(rid_location is None or len(columns) != self.table.num_columns):
+        if(rid_location is None):
             return False
-
+        
         # The tail should have the same number of columns as the other pages so we should be multiplying by the total_num_columns value
         # Multiplying by [None] atm since the columns don't have an assigned size
         new_columns = [None] * self.table.total_num_columns
@@ -86,24 +84,32 @@ class Query:
         for i, value in enumerate(columns):
 
             # If we're modifying the primary_key then this update should be stopped since we can't change the primary_key column
-            if(i == self.table.key and value != primary_key):
+            if(i == self.table.key or value == primary_key):
                 return False
             
             new_columns[NUM_HIDDEN_COLUMNS + i] = value
 
-        prev_tail_rid = self.__getLatestTailRid(rid_location)
+        # schema = 0; schema += 2^i or bit shift schema += 1 << i
+
+        # We want to set indirection for temp tail record to be the previous tail_rid --> go to base/cons to get latest
+        cons_rid = self.__getLatestConRid(rid_location)
+        cons_page_index, cons_page_slot = self.table.page_directory[cons_rid][0]
+        prev_tail_rid = self.table.base_pages[INDIRECTION_COLUMN][cons_page_index].get(cons_page_slot)
         new_columns[INDIRECTION_COLUMN] = prev_tail_rid
+
 
         # Create new record and initialize it into the pd
         new_record = Record(rid = -1, key = primary_key, columns = new_columns)
+
         self.table.assign_rid_to_record(new_record)
         self.table.page_directory[new_record.rid] = [None] * self.table.total_num_columns
+        new_columns[RID_COLUMN] =  new_record.rid
         self.__writeTailRecord(new_record)
 
 
-        # Updates the indirection column on the base page for new tail page
-        page_index, page_slot = self.table.page_directory[rid_location]
-        self.table.base_pages[page_index].write_precise(page_slot, new_record.rid)
+        # Updates the indirection column on the base/cons page for new tail page
+        page_index, page_slot = self.table.page_directory[cons_rid][INDIRECTION_COLUMN]
+        self.table.base_pages[INDIRECTION_COLUMN][page_index].write_precise(page_slot, new_record.rid)        
 
         # Update indices
         self.table.index.update_all_indices(primary_key, *new_columns)
@@ -159,22 +165,29 @@ class Query:
     base/consolidated records. Iterate through with until the column_page_locations tuple
     is greater than 1, signifying the end of the base/consolidated records
     """
-    def __getLatestTailRid(self, base_rid):
+    def __getLatestConRid(self, base_rid):
 
-        # Get the base record's indirection pointer from the base page
-        base_page_index, base_page_slot = self.table.page_directory[base_rid][INDIRECTION_COLUMN]
+        # We are given the base rid so we want to start from here and iterate through all the consolidated pages if there are any
+        base_page_index, base_page_slot = self.table.page_directory[base_rid][0]
+
+        # Assuming that there are none, we want to set the indirection rid to be the base page's; this would point to the latest tail
         indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][base_page_index].get(base_page_slot)
 
+        # If no cons; newest is base
+        previous_rid = base_rid
+
+        ## This is moreso just for checking tuple length to ensure we're looking at a base/consolidated page
         column_page_locations = self.table.page_directory[indirection_rid]
 
-        # Walk through consolidated pages
+        # If there are consolidated pages w/ we walk them for indirection ptr that points to the latest tail
         while(indirection_rid != base_rid and len(column_page_locations) == 1):
             
+            previous_rid = indirection_rid
             page_index, page_slot = column_page_locations[0]
             indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][page_index].get(page_slot)
             column_page_locations = self.table.page_directory[indirection_rid]
-
-        return indirection_rid
+        
+        return previous_rid
     
 
     """Helper function that writes the new record into the appropriate tail pages."""
@@ -190,10 +203,12 @@ class Query:
             if(not self.table.tail_pages[i][-1].has_capacity()):
                 self.table.tail_pages[i].append(Page())
 
-
+            # Current page is the latest tail page
             curr_page: Page = self.table.tail_pages[i][-1]
             
+            # Writing to current page, we get the position of the tail record in the page & index of the page
             pos = curr_page.write(new_record.columns[i])
             tail_page_index = len(self.table.tail_pages[i]) - 1
 
+            # Write this to the pd
             self.table.page_directory[new_record.rid][i] = (tail_page_index, pos)
