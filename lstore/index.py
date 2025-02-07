@@ -97,7 +97,10 @@ class Index:
             if self.indices[i] != None:
                 value = self.search_value(self.indices[i], rid[0])
                 self.indices[i].discard((rid[0], value))
-                self.indices[i].add((columns[RID_COLUMN], columns[NUM_HIDDEN_COLUMNS + i]))
+                if columns[NUM_HIDDEN_COLUMNS + i] != None:
+                    self.indices[i].add((columns[RID_COLUMN], columns[NUM_HIDDEN_COLUMNS + i]))
+                else:
+                    self.indices[i].add((columns[RID_COLUMN], value))
     
     """
     # Takes a record and insert it into every indices
