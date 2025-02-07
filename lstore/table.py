@@ -69,9 +69,7 @@ class Table:
             # Note: Subject to change if each column's data isn't an integer
             if (i == RID_COLUMN):
                 self.page_directory[record.rid] = [(len(self.base_pages[i]) - 1, page_index)]
-
-        # TODO: Query Insert should implement this
-        pass
+                
 
     def update_record(self, record: Record):
         origin_rid = self.index.locate(self.key, record.columns[NUM_HIDDEN_COLUMNS + self.key])
