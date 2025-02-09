@@ -24,7 +24,46 @@ class Query:
     # Return False if record doesn't exist or is locked due to 2PL
     """
     def delete(self, primary_key):
-        pass
+
+        # Locate the RID associated with the primary key
+        base_rid = self.table.index.locate(self.table.key, primary_key)
+        if(base_rid is None):
+            return False  # Record does not exist
+        
+        # Try to delete the element associated with rid from all indices. Return false if can't
+        try:
+            self.table.index.delete_from_all_indices(primary_key)
+    
+        except ValueError:
+            return False
+
+
+        # Storing all the records (base, consolidated, tail) in a set so I can delete them all after iterating through the indirection columns
+        to_delete = set()
+
+        # Start from the base record, we iterate through every indirection column 
+        base_page_index, base_page_slot = self.table.page_directory[base_rid][0]
+        indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][base_page_index].get(base_page_slot)
+        column_page_locations = self.table.page_directory[indirection_rid]
+
+        to_delete.add(base_rid)
+
+        # As long as we don't interate back to the base record or the indirection points to None, we have records we need to go through
+        while(indirection_rid != base_rid or indirection_rid is not None):
+
+            # Add the indirection rid to the list to delete
+            to_delete.add(indirection_rid)
+
+            page_index, page_slot = column_page_locations[0]
+            indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][page_index].get(page_slot)
+            column_page_locations = self.table.page_directory[indirection_rid]
+
+        # Start process of removing records
+        for rid_to_delete in to_delete:
+            del self.table.page_directory[rid_to_delete]
+
+        # Deletion successful
+        return True
     
     
     """
