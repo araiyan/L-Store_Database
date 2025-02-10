@@ -109,15 +109,20 @@ class Query:
             # iterate through all desired RIDs
             for rid in rid_list:
                 
-                # assume con_page always exists
-                # will fix this later
                 latest_consolidated_rid = self.__getLatestConRid(rid)
 
-                base_page_location = self.table.page_directory.get(latest_consolidated_rid, None)
-                base_page_number, base_page_index = base_page_location[0]
-                consolidated_timestamp = self.table.base_pages[TIMESTAMP_COLUMN][base_page_number].get(base_page_index)
+                if not latest_consolidated_rid:
+                    base_page_location = self.table.page_directory.get(rid, None)
+                    base_page_number, base_page_index = base_page_location[0]
+
+                    if base_page_location is None:
+                        continue
+                else:
+                    base_page_location = self.table.page_directory.get(latest_consolidated_rid, None)
+                    base_page_number, base_page_index = base_page_location[0]
+                    consolidated_timestamp = self.table.base_pages[TIMESTAMP_COLUMN][base_page_number].get(base_page_index)
                 
-                # store latest consolidated values within projected columns - we will update values as necessary 
+                # store latest base/consolidated values within projected columns - we will update values as necessary 
                 record_columns = [
                     self.table.base_pages[NUM_HIDDEN_COLUMNS + i][base_page_number].get(base_page_index)
                     if projected_columns_index[i] == 1 else None
@@ -135,7 +140,7 @@ class Query:
                     
                     # If we have a tail page with an older timestamp, stop updating
                     if consolidated_timestamp and tail_timestamp <= consolidated_timestamp:
-                        # the code below should be unnecessary since we already store the latest con_page's values in line 123
+                        # the code below should be unnecessary since we already store the latest con_page's values in line 126
                         # -----------------------------------------------------------------------------------------------------------
                         # for i in range(len(projected_columns_index)):
                         #     if projected_columns_index[i] == 1 and record_columns[i] is None:
@@ -184,28 +189,28 @@ class Query:
 
             for rid in rid_list:
                 latest_consolidated_rid = self.__getLatestConRid(rid)
-
-                # if consolidated page doesn't exist, use base page. Else, proceed with consolidated page
+                
                 if not latest_consolidated_rid:
                     base_page_location = self.table.page_directory.get(rid, None)
+                    base_page_number, base_page_index = base_page_location[0]
+
                     if base_page_location is None:
                         continue
-                    else:
-                        base_page_location = self.table.page_directory.get(latest_consolidated_rid, None)
+                else:
+                    base_page_location = self.table.page_directory.get(latest_consolidated_rid, None)
+                    base_page_number, base_page_index = base_page_location[0]
+                    consolidated_timestamp = self.table.base_pages[TIMESTAMP_COLUMN][base_page_number].get(base_page_index)
+                
+                base_page_location = self.table.page_directory.get(latest_consolidated_rid, None)
                 
                 base_page_number, base_page_index = base_page_location[0]
 
+                # tail page RID
                 indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][base_page_number].get(base_page_index)
-
+                
                 # traverse through the tail pages based on the relative version
                 current_version = 0
-                while current_version >= relative_version and indirection_rid != rid:
-                    schema_encoding = self.table.__grab_tail_value_from_rid(indirection_rid, SCHEMA_ENCODING_COLUMN)
-                    for i in range(len(projected_columns_index)):
-                        if projected_columns_index[i] == 1 and ((schema_encoding >> i) & 1) == 1:
-                            record_columns[i] = self.table.__grab_tail_value_from_rid(indirection_rid, NUM_HIDDEN_COLUMNS + i)
-                            projected_columns_index[i] = 0  # Mark column as filled
-                    
+                while current_version > relative_version and indirection_rid != rid:
                     indirection_rid = self.table.__grab_tail_value_from_rid(indirection_rid, INDIRECTION_COLUMN)
                     current_version -= 1
 
@@ -217,6 +222,17 @@ class Query:
                     if projected_columns_index[i] == 1 else None
                     for i in range(len(projected_columns_index))
                 ]
+                # otherwise we traverse backwards from current rid
+                # will need to traverse through con_pages till we find one that is equal to or less than relative version
+                else:
+                    while indirection_rid != rid:
+                        schema_encoding = self.table.__grab_tail_value_from_rid(indirection_rid, SCHEMA_ENCODING_COLUMN)
+                        for i in range(len(projected_columns_index)):
+                            if projected_columns_index[i] == 1 and ((schema_encoding >> i) & 1) == 1:
+                                record_columns[i] = self.table.__grab_tail_value_from_rid(indirection_rid, NUM_HIDDEN_COLUMNS + i)
+                                projected_columns_index[i] = 0  # Mark column as filled
+                        
+                        indirection_rid = self.table.__grab_tail_value_from_rid(indirection_rid, INDIRECTION_COLUMN)
                     
                 record_objs.append(Record(rid, search_key, record_columns))
                 
