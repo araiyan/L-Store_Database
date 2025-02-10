@@ -37,30 +37,27 @@ class Query:
         except ValueError:
             return False
 
-
-        # Storing all the records (base, consolidated, tail) in a set so I can delete them all after iterating through the indirection columns
-        to_delete = set()
-
         # Start from the base record, we iterate through every indirection column 
         base_page_index, base_page_slot = self.table.page_directory[base_rid][0]
+        # Record marked for deletion, we write the deletion flag to the base page
+        self.table.base_pages[RID_COLUMN][base_page_index].write_precise(base_page_slot, RECORD_DELETION_FLAG)
         indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][base_page_index].get(base_page_slot)
         column_page_locations = self.table.page_directory[indirection_rid]
 
-        to_delete.add(base_rid)
+        self.table.diallocation_rid_queue.put(base_rid)
 
         # As long as we don't interate back to the base record or the indirection points to None, we have records we need to go through
         while(indirection_rid != base_rid or indirection_rid is not None):
 
             # Add the indirection rid to the list to delete
-            to_delete.add(indirection_rid)
+            self.table.diallocation_rid_queue.put(indirection_rid)
 
-            page_index, page_slot = column_page_locations[0]
+            page_index, page_slot = column_page_locations[INDIRECTION_COLUMN]
+
+            # Get the next indirection rid
             indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][page_index].get(page_slot)
             column_page_locations = self.table.page_directory[indirection_rid]
 
-        # Start process of removing records
-        for rid_to_delete in to_delete:
-            del self.table.page_directory[rid_to_delete]
 
         # Deletion successful
         return True
