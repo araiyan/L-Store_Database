@@ -3,6 +3,8 @@ from lstore.page import Page
 from time import time
 from lstore.config import *
 
+import queue
+
 class Record:
 
     def __init__(self, rid, key, columns):
@@ -36,6 +38,8 @@ class Table:
         self.tail_pages = {}
         self.tail_pages_prev_merge = [0] * self.num_columns
         '''Keeps track of the number of tail pages that have been merged'''
+
+        self.diallocation_rid_queue = queue.Queue()
 
         # The table should handle assigning RIDs
         self.rid_index = 0
