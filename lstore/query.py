@@ -109,7 +109,7 @@ class Query:
             new_columns[NUM_HIDDEN_COLUMNS + i] = value
 
         # We want to set indirection for temp tail record to be the previous tail_rid --> go to base/cons to get latest
-        cons_rid = self.__getLatestConRid(rid_location)
+        cons_rid = self.__getLatestConRid(rid_location[0])
         cons_page_index, cons_page_slot = self.table.page_directory[cons_rid][0]
         prev_tail_rid = self.table.base_pages[INDIRECTION_COLUMN][cons_page_index].get(cons_page_slot)
         
