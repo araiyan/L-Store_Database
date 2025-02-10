@@ -16,8 +16,8 @@ class Index:
 
         self.num_columns = table.num_columns
         self.key = table.key
-        for i in range(table.num_columns):
-            self.create_index(i)
+
+        self.create_index(self.key)
 
     """
     # returns the location of all records with the given value on column "column" as a list
@@ -63,6 +63,14 @@ class Index:
                 value = prev_columns[i]
                 del self.indices[i][value][rid[0]]
                 self.indices[i][columns[NUM_HIDDEN_COLUMNS + i]][rid[0]] = True
+
+    def insert_to_index(self, column_index, column_value, rid):
+        index = self.indices[column_index]
+
+        if (index is None):
+            raise IndexError("No indicy in the specified column")
+        
+        index[column_value][rid] = True
     
     """
     # Takes a record and insert it into every indices

@@ -83,7 +83,7 @@ class Query:
         record.columns = hidden_columns + list(columns)
         
         self.table.insert_record(record)
-        self.table.index.insert_in_all_indices(*record.columns)
+        self.table.index.insert_to_index(self.table.key, columns[self.table.key], record.rid)
 
     
     """
