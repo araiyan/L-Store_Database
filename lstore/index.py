@@ -11,7 +11,7 @@ class Index:
         self.indices = [None] * table.num_columns
         self.num_columns = table.num_columns
         self.key = table.key
-
+        self.table = table
         #only need primary index
         self.create_index(self.key)
         #for i in range(table.num_columns):
@@ -74,8 +74,23 @@ class Index:
             else:
                 if all_rid == rid:
                     return key
-        return None
+        return None 
 
+    """
+    def search_value(self, primary_key, all_rid, column_number):
+        for rid in all_rid:
+            # check if given key matches any rid in the set of rid
+            # if key matches, find the column value
+            if isinstance(self.table.page_directory[rid], tuple):
+                page_index, page_slot = self.table.page_directory[rid][0]
+                if primary_key == self.table.base_pages[self.key + NUM_HIDDEN_COLUMNS][page_index].get(page_slot):
+                    return self.table.base_pages[column_number][page_index].get(page_slot)
+            else:
+                page_index, page_slot = self.table.page_directory[rid][self.key + NUM_HIDDEN_COLUMNS]
+                if primary_key == self.table.tail_pages[self.key + NUM_HIDDEN_COLUMNS][page_index].get(page_slot):
+                    return self.table.tail_pages[column_number][page_index].get(page_slot)
+        return None
+    """
     """
     # Update new RID for all indices when a record is updated
     """
@@ -92,8 +107,11 @@ class Index:
             if self.indices[i] != None:
 
                 #search for value with matching rid
-                value = self.search_value(self.indices[i], temp_rid)
-
+                if i == self.key:
+                    value = primary_key
+                else:
+                    #value = self.search_value(primary_key, temp_rid, i + NUM_HIDDEN_COLUMNS)
+                    value = self.search_value(self.indices[i],temp_rid)
                 #remove rid from the set
                 self.indices[i][value].discard(list(rid)[0])
 
@@ -148,7 +166,11 @@ class Index:
         for i in range(0, self.num_columns):
             if self.indices[i] != None:
                 # look for value matched to rid
-                value = self.search_value(self.indices[i], rid)
+                if i == self.key:
+                    value = primary_key
+                else:
+                    #value = self.search_value(primary_key, temp_rid, i + NUM_HIDDEN_COLUMNS)
+                    value = self.search_value(self.indices[i],rid)
 
                 #discard rid from the set, if it became empty set, delete the value too
                 self.indices[i][value].discard(list(rid)[0])
