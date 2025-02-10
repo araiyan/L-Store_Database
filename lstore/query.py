@@ -108,26 +108,45 @@ class Query:
 
             # iterate through all desired RIDs
             for rid in rid_list:
-                base_page_location = self.table.page_directory.get(rid, None)
-                if base_page_location is None:
-                    continue
-                    
+
+                latest_consolidated_rid = self.__getLatestConRid(rid)
+
+                # if consolidated page doesn't exist, use base page. Else, use consolidated page
+                if not latest_consolidated_rid:
+                    base_page_location = self.table.page_directory.get(rid, None)
+                    if base_page_location is None:
+                        continue
+                    else:
+                        base_page_location = self.table.page_directory.get(latest_consolidated_rid, None)
+                        consolidated_timestamp = self.table.__grab_tail_value_from_rid(latest_consolidated_rid, TIMESTAMP_COLUMN)
+                
                 # store the (base) page# and index# that the RID/row is located
                 base_page_number, base_page_index = base_page_location[0]
 
                 # store base values within projected columns - we will update values with latest data as necessary 
                 record_columns = [
                     self.table.base_pages[NUM_HIDDEN_COLUMNS + i][base_page_number].get(base_page_index)
-                    for i in range(len(projected_columns_index)) if projected_columns_index[i] == 1
+                    if projected_columns_index[i] == 1 else None
+                    for i in range(len(projected_columns_index))
                 ]
+                
+                indirection_rid = latest_consolidated_rid
 
-                # retrieve indirection RID so that we can traverse through updated pages/records
-                indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][base_page_number].get(base_page_index)
-
+                # now we are traversing through tail pages
                 while indirection_rid != rid:
                     # grab schema encoding value to determine whether or not a given column within a tail record was updated
                     schema_encoding = self.table.__grab_tail_value_from_rid(indirection_rid, SCHEMA_ENCODING_COLUMN)
+                    tail_timestamp = self.table.__grab_tail_value_from_rid(indirection_rid, TIMESTAMP_COLUMN)
                     
+                    # If we have a consolidated page with a newer timestamp, fill unfilled columns from it
+                    if tail_timestamp < consolidated_timestamp:
+                        for i in range(len(projected_columns_index)):
+                            if projected_columns_index[i] == 1 and record_columns[i] is None:
+                                # Fill missing columns from the consolidated page
+                                record_columns[i] = self.table.__grab_tail_value_from_rid(latest_consolidated_rid, NUM_HIDDEN_COLUMNS + i)
+                                projected_columns_index[i] = 0
+                        break
+
                     for i in range(len(projected_columns_index)):
                         if projected_columns_index[i] == 1 and ((schema_encoding >> i) & 1) == 1:
                             record_columns[i] = self.table.__grab_tail_value_from_rid(indirection_rid, NUM_HIDDEN_COLUMNS + i) 
@@ -168,7 +187,7 @@ class Query:
                 base_page_location = self.table.page_directory.get(rid, None)
                 if base_page_location is None:
                     continue
-
+                
                 base_page_number, base_page_index = base_page_location[0]
 
                 indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][base_page_number].get(base_page_index)
