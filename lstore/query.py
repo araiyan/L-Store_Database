@@ -200,7 +200,7 @@ class Query:
 
                 # traverse through the tail pages based on the relative version
                 current_version = 0
-                while current_version > relative_version and indirection_rid != rid:
+                while current_version >= relative_version and indirection_rid != rid:
                     schema_encoding = self.table.__grab_tail_value_from_rid(indirection_rid, SCHEMA_ENCODING_COLUMN)
                     for i in range(len(projected_columns_index)):
                         if projected_columns_index[i] == 1 and ((schema_encoding >> i) & 1) == 1:
