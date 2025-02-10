@@ -4,7 +4,6 @@ from lstore.page import Page
 from lstore.config import *
 from time import time
 
-
 class Query:
     """
     # Creates a Query object that can perform different queries on the specified table 
@@ -61,7 +60,53 @@ class Query:
     # Assume that select will never be called on a key that doesn't exist
     """
     def select(self, search_key, search_key_index, projected_columns_index):
-        pass
+        try:
+            # retrieve a list of RIDs that contain the "search_key" value within the column as defined by "search_key_index"
+            rid_list = self.table.index.locate(search_key_index, search_key)
+
+            # if there exists no RIDs that match the given parameters, return False
+            if not rid_list:
+                return False
+
+            record_objs = []
+
+            # iterate through all desired RIDs
+            for rid in rid_list:
+                base_page_location = self.table.page_directory.get(rid, None)
+                if base_page_location is None:
+                    continue
+                    
+                # store the (base) page# and index# that the RID/row is located
+                base_page_number, base_page_index = base_page_location[0]
+
+                # store base values within projected columns - we will update values with latest data as necessary 
+                record_columns = [
+                    self.table.base_pages[NUM_HIDDEN_COLUMNS + i][base_page_number].get(base_page_index)
+                    for i in range(len(projected_columns_index)) if projected_columns_index[i] == 1
+                ]
+
+                # retrieve indirection RID so that we can traverse through updated pages/records
+                indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][base_page_number].get(base_page_index)
+
+                while indirection_rid != rid:
+                    # grab schema encoding value to determine whether or not a given column within a tail record was updated
+                    schema_encoding = self.table.__grab_tail_value_from_rid(indirection_rid, SCHEMA_ENCODING_COLUMN)
+                    
+                    for i in range(len(projected_columns_index)):
+                        if projected_columns_index[i] == 1 and ((schema_encoding >> i) & 1) == 1:
+                            record_columns[i] = self.table.__grab_tail_value_from_rid(indirection_rid, NUM_HIDDEN_COLUMNS + i) 
+                            projected_columns_index[i] = 0 # we no longer want to update this column - otherwise, we would be overriding newer data with old data
+
+                    # update indirection_rid to the next (previous version) within chain of tail records
+                    indirection_rid = self.table.__grab_tail_value_from_rid(indirection_rid, INDIRECTION_COLUMN)
+
+                record_objs.append(Record(rid, search_key, record_columns))
+
+            return record_objs if record_objs else False
+        
+        except Exception as e:
+            print(f"Error in select: {e}")
+            return False
 
     
     """
@@ -75,7 +120,51 @@ class Query:
     # Assume that select will never be called on a key that doesn't exist
     """
     def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
-        pass
+        try:
+            rid_list = self.table.index.locate(search_key_index, search_key)
+
+            if not rid_list:
+                return False
+            
+            record_objs = []
+
+            for rid in rid_list:
+                base_page_location = self.table.page_directory.get(rid, None)
+                if base_page_location is None:
+                    continue
+
+                base_page_number, base_page_index = base_page_location[0]
+
+                indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][base_page_number].get(base_page_index)
+
+                # traverse through the tail pages based on the relative version
+                current_version = 0
+                while current_version > relative_version and indirection_rid != rid:
+                    current_version -= 1
+                    indirection_rid = self.table.__grab_tail_value_from_rid(indirection_rid, INDIRECTION_COLUMN)
+                
+                # unsuccessful in finding an older version - this implies that indirection_rid == rid and we can
+                # thus directly retrieve from the base page
+                if current_version > relative_version:
+                    record_columns = [
+                    self.table.base_pages[NUM_HIDDEN_COLUMNS + i][base_page_number].get(base_page_index)
+                    for i in range(len(projected_columns_index)) if projected_columns_index[i] == 1
+                ]
+                # otherwise, retrieve from the relative version
+                else:
+                    record_columns = [
+                    self.table.__grab_tail_value_from_rid(indirection_rid, NUM_HIDDEN_COLUMNS + i)
+                    if projected_columns_index[i] == 1 else None
+                    for i in range(len(projected_columns_index))
+                ]
+                    
+                record_objs.append(Record(rid, search_key, record_columns))
+                
+            return record_objs if record_objs else False
+        
+        except Exception as e:
+            print(f"Error during select_version: {e}")
+            return False
 
     
         """
