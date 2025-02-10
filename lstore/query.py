@@ -111,7 +111,7 @@ class Query:
 
                 latest_consolidated_rid = self.__getLatestConRid(rid)
 
-                # if consolidated page doesn't exist, use base page. Else, use consolidated page
+                # if consolidated page doesn't exist, use base page. Else, proceed with consolidated page
                 if not latest_consolidated_rid:
                     base_page_location = self.table.page_directory.get(rid, None)
                     if base_page_location is None:
@@ -139,7 +139,7 @@ class Query:
                     tail_timestamp = self.table.__grab_tail_value_from_rid(indirection_rid, TIMESTAMP_COLUMN)
                     
                     # If we have a consolidated page with a newer timestamp, fill unfilled columns from it
-                    if tail_timestamp < consolidated_timestamp:
+                    if consolidated_timestamp and tail_timestamp < consolidated_timestamp:
                         for i in range(len(projected_columns_index)):
                             if projected_columns_index[i] == 1 and record_columns[i] is None:
                                 # Fill missing columns from the consolidated page
@@ -184,9 +184,15 @@ class Query:
             record_objs = []
 
             for rid in rid_list:
-                base_page_location = self.table.page_directory.get(rid, None)
-                if base_page_location is None:
-                    continue
+                latest_consolidated_rid = self.__getLatestConRid(rid)
+
+                # if consolidated page doesn't exist, use base page. Else, proceed with consolidated page
+                if not latest_consolidated_rid:
+                    base_page_location = self.table.page_directory.get(rid, None)
+                    if base_page_location is None:
+                        continue
+                    else:
+                        base_page_location = self.table.page_directory.get(latest_consolidated_rid, None)
                 
                 base_page_number, base_page_index = base_page_location[0]
 
