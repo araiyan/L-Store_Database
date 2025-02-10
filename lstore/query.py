@@ -160,7 +160,7 @@ class Query:
             rid_list = self.table.index.locate(search_key_index, search_key)
 
             if not rid_list:
-                return False
+                raise ValueError("No records found with the given key")
             
             record_objs = []
 
@@ -220,6 +220,7 @@ class Query:
         new_columns = [None] * self.table.total_num_columns
 
         schema_encoding = 0
+        projected_columns = []
 
         # Insert values into the new column
         for i, value in enumerate(columns):
@@ -230,6 +231,9 @@ class Query:
             
             if(value is not None):
                 schema_encoding |= (1 << i)
+                projected_columns.append(1)
+            else:
+                projected_columns.append(0)
             
             new_columns[NUM_HIDDEN_COLUMNS + i] = value
 
@@ -240,7 +244,7 @@ class Query:
         
         new_columns[INDIRECTION_COLUMN] = prev_tail_rid
         new_columns[SCHEMA_ENCODING_COLUMN] = schema_encoding
-        new_columns[TIMESTAMP_COLUMN] = int(time.time())
+        new_columns[TIMESTAMP_COLUMN] = int(time())
 
 
         # Create new record and initialize it into the pd
@@ -254,6 +258,8 @@ class Query:
         # Updates the indirection column on the base/cons page for new tail page
         page_index, page_slot = self.table.page_directory[cons_rid][0]
         self.table.base_pages[INDIRECTION_COLUMN][page_index].write_precise(page_slot, new_record.rid)        
+
+        latest_record = self.select(primary_key, self.table.key, projected_columns)
 
         # Update indices
         self.table.index.update_all_indices(primary_key, *new_columns)
