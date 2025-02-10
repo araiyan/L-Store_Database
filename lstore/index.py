@@ -64,9 +64,16 @@ class Index:
     # Search for values with RID in the parameter in indices
     """
     def search_value(self, column, rid):
-        for key, value in column.items():
-            if value == rid:
-                return key
+        for key, all_rid in column.items():
+            
+            # if more than one rid are mapped to a value
+            if len(all_rid) > 1:
+                for value in all_rid:
+                    if value == rid:
+                        return key
+            else:
+                if all_rid == rid:
+                    return key
         return None
 
     """
