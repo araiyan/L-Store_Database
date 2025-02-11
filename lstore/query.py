@@ -263,7 +263,44 @@ class Query:
     # Returns False if no record exists in the given range
     """
     def sum(self, start_range, end_range, aggregate_column_index):
-        return self.sum_version(start_range, end_range, aggregate_column_index, 0)
+        # Grabs all records rid
+        # TODO: If each indicy is a binary tree we need to iterate through the binary tree and grab all rids
+       
+        # Get all record RIDs in the range using the **primary key index**        
+        all_rids = self.table.index.locate_range(start_range, end_range, self.table.key)
+       
+       
+        if not all_rids:
+            return False  # Return False if no records exist in range
+ 
+        total_sum = 0  # Initialize sum
+       
+        for base_rid in all_rids:
+            print(base_rid)
+            # Get base record location
+            if base_rid not in self.table.page_directory:
+                continue  # Skip if RID not found
+ 
+            page_index, page_slot = self.table.page_directory[base_rid]
+ 
+            # Check the Indirection Column for the latest version
+            indirection = self.get_column_value(page_index, page_slot, self.table.indirection_column_index)
+ 
+            latest_rid = base_rid  # Assume base_rid is latest unless indirection points to a newer RID
+            if indirection and indirection != 0:
+                latest_rid = indirection  # Follow latest RID
+ 
+            # Get the latest column value
+            if latest_rid not in self.table.page_directory:
+                continue  # Skip if no valid latest record found
+ 
+            latest_page_index, latest_page_slot = self.table.page_directory[latest_rid]
+            latest_value = self.get_column_value(latest_page_index, latest_page_slot, aggregate_column_index)
+ 
+            total_sum += latest_value  # Accumulate the sum
+ 
+        return total_sum if total_sum != 0 else False
+        #return self.sum_version(start_range, end_range, aggregate_column_index, 0)
 
     
     """
@@ -281,7 +318,47 @@ class Query:
         for rid in records_list:
             pass
         
-        return sum_total
+
+       # return sum_total
+       
+       # Get all record RIDs in the range using the **primary key index**        
+        all_rids = self.table.index.locate_range(start_range, end_range, self.table.key)
+       
+        if not all_rids:
+            return False  # Return False if no records exist in range
+ 
+        total_sum = 0  # Initialize sum
+ 
+        for base_rid in all_rids:
+            # Get base record location
+            if base_rid not in self.table.page_directory:
+                continue  # Skip if RID not found
+ 
+            page_index, page_slot = self.table.page_directory[base_rid]
+ 
+            # Follow the version chain based on `relative_version`
+            current_rid = base_rid
+            for _ in range(relative_version):
+                indirection = self.get_column_value(page_index, page_slot, self.table.indirection_column_index)
+ 
+                if indirection is None or indirection == 0:
+                    break  # Stop if no further versions exist
+ 
+                current_rid = indirection
+                if current_rid not in self.table.page_directory:
+                    break  # Stop if no valid RID found
+ 
+                page_index, page_slot = self.table.page_directory[current_rid]
+ 
+            # Get the value at the requested version
+            latest_value = self.get_column_value(page_index, page_slot, aggregate_column_index)
+            total_sum += latest_value  # Accumulate the sum
+ 
+ 
+        return total_sum if total_sum != 0 else False
+ 
+
+       # return sum_total
 
     
     """
@@ -291,6 +368,14 @@ class Query:
     :param column: the column to increment
     # Returns True is increment is successful
     # Returns False if no record matches key or if target record is locked by 2PL.
+    """
+    def get_column_value(self, page_index, page_slot, column_index):
+   
+        return self.table.pages[page_index][column_index][page_slot]  # Retrieve value from in-memory storage
+    
+    """
+    Retrieves a column value from a page.
+    Assumes the table has a dictionary `pages` storing data.
     """
     def increment(self, key, column):
         r = self.select(key, self.table.key, [1] * self.table.num_columns)[0]
