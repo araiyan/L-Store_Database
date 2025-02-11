@@ -263,9 +263,43 @@ class Query:
     # Returns False if no record exists in the given range
     """
     def sum(self, start_range, end_range, aggregate_column_index):
-        return self.sum_version(start_range, end_range, aggregate_column_index, 0)
+        # Grabs all records rid
+        # TODO: If each indicy is a binary tree we need to iterate through the binary tree and grab all rids
+       
+        all_rids = self.table.index.locate_range(self,  aggregate_column_index, start_range, end_range)
+       
+       
+        if not all_rids:
+            return False  # Return False if no records exist in range
+ 
+        total_sum = 0  # Initialize sum
+       
+        for base_rid in all_rids:
+            print(base_rid)
+            # Get base record location
+            if base_rid not in self.table.page_directory:
+                continue  # Skip if RID not found
+ 
+            page_index, page_slot = self.table.page_directory[base_rid]
+ 
+            # Check the Indirection Column for the latest version
+            indirection = self.get_column_value(page_index, page_slot, self.table.indirection_column_index)
+ 
+            latest_rid = base_rid  # Assume base_rid is latest unless indirection points to a newer RID
+            if indirection and indirection != 0:
+                latest_rid = indirection  # Follow latest RID
+ 
+            # Get the latest column value
+            if latest_rid not in self.table.page_directory:
+                continue  # Skip if no valid latest record found
+ 
+            latest_page_index, latest_page_slot = self.table.page_directory[latest_rid]
+            latest_value = self.get_column_value(latest_page_index, latest_page_slot, aggregate_column_index)
+ 
+            total_sum += latest_value  # Accumulate the sum
+ 
+        return total_sum if total_sum != 0 else False
 
-    
     """
     :param start_range: int         # Start of the key range to aggregate 
     :param end_range: int           # End of the key range to aggregate 
