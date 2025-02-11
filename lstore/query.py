@@ -30,9 +30,6 @@ class Query:
         base_rid = self.table.index.locate(self.table.key, primary_key)
         if(base_rid is None):
             return False  # Record does not exist
-        
-
-        self.table.index.delete_key_index(primary_key)
 
         # Start from the base record, we iterate through every indirection column 
         base_page_index, base_page_slot = self.table.page_directory[base_rid[0]][0]
