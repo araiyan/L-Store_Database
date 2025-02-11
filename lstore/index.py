@@ -35,7 +35,7 @@ class Index:
     # returns None if no rid found
     """
     def locate_range(self, begin, end, column):
-        return list(self.indices[column].values(min=begin, max=end)) or None
+        return list(self.indices[column].keys(min=begin, max=end)) or None
 
     """
     # optional: Create index on specific column
