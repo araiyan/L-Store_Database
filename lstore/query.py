@@ -300,7 +300,9 @@ class Query:
             total_sum += latest_value  # Accumulate the sum
  
         return total_sum if total_sum != 0 else False
+        #return self.sum_version(start_range, end_range, aggregate_column_index, 0)
 
+    
     """
     :param start_range: int         # Start of the key range to aggregate 
     :param end_range: int           # End of the key range to aggregate 
@@ -311,11 +313,12 @@ class Query:
     # Returns False if no record exists in the given range
     """
     def sum_version(self, start_range, end_range, aggregate_column_index, relative_version):
-       # records_list = self.table.index.locate_range(start_range, end_range, self.table.key)
-       # sum_total = 0
-       # for rid in records_list:
-       #     pass
+        records_list = self.table.index.locate_range(start_range, end_range, self.table.key)
+        sum_total = 0
+        for rid in records_list:
+            pass
         
+
        # return sum_total
        
        # Get all record RIDs in the range using the **primary key index**        
@@ -354,6 +357,10 @@ class Query:
  
         return total_sum if total_sum != 0 else False
  
+
+       # return sum_total
+
+    
     """
     Increments one column of the record
     this implementation should work if your select and update queries already work
