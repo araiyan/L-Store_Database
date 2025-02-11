@@ -138,6 +138,10 @@ class Table:
             indirection_rid = self.__grab_tail_value_from_rid(indirection_rid, INDIRECTION_COLUMN)
 
         return Record(origin_rid, self.key, record_columns)
+    
+    def grab_tail_value_from_page_location(self, tail_location, column):
+        page_index, page_slot = tail_location[column]
+        return self.tail_pages[column][page_index].get(page_slot)
         
     def __grab_tail_value_from_rid(self, rid, column, base_page=False):
         '''Given a records rid and column number this function returns tail page value in that specific physical location'''

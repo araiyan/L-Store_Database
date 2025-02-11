@@ -4,16 +4,22 @@ A data strucutre holding indices for various columns of a table. Key column shou
 from lstore.config import *
 from BTrees.OOBTree import OOBTree
 
+from BTrees.OOBTree import OOBTree
+
 class Index:
 
     def __init__(self, table):
         # One index for each table. All our empty initially.
         self.indices = [None] * table.num_columns
+        # indices that maps primary key to updated column values
+        self.value_mapper = [None] * table.num_columns
+
         self.num_columns = table.num_columns
         self.key = table.key
+
+        self.create_index(self.key)
         self.table = table
         #only need primary index
-        self.create_index(self.key)
         #for i in range(table.num_columns):
         #    self.create_index(i)
 
@@ -22,24 +28,14 @@ class Index:
     # returns None if no rid found
     """
     def locate(self, column, value):
-        try:
-            rid = self.indices[column][value]
-            return list(rid)
-        except KeyError:
-            return None
+        return list(self.indices[column].get(value, [])) or None
        
     """
     # Returns the RIDs of all records with values in column "column" between "begin" and "end" as a list
     # returns None if no rid found
     """
     def locate_range(self, begin, end, column):
-        all_rid = list(self.indices[column].values(begin, end))
-
-        #turn list of sets into just a list
-        list_of_rid = []
-        for rid in all_rid:
-            list_of_rid.append(list(rid)[0])
-        return list_of_rid
+        return list(self.indices[column].values(min=begin, max=end)) or None
 
     """
     # optional: Create index on specific column
@@ -59,6 +55,11 @@ class Index:
             self.indices[column_number].clear()
             self.indices[column_number] = None
 
+    """
+    # Update new RID for all indices when a record is updated
+    """
+    def update_all_indices(self, primary_key, prev_columns, *columns):
+        rid = self.locate(self.key, primary_key)
 
     """
     # Search for values with RID in the parameter in indices
@@ -91,6 +92,18 @@ class Index:
                     return self.table.tail_pages[column_number][page_index].get(page_slot)
         return None
     """
+    def insert_to_index(self, column_index, column_value, rid):
+        '''Used to insert the primary key for primary key indexing'''
+        index:OOBTree = self.indices[column_index]
+
+        if (index is None):
+            raise IndexError("No indicy in the specified column")
+        
+        if (not index.get(column_value)):
+            index[column_value] = {}
+
+        index[column_value][rid] = True
+        
     """
     # Update new RID for all indices when a record is updated
     """
@@ -140,21 +153,15 @@ class Index:
     # Columns are inserted in a tuple(rid, column value)
     """
     def insert_in_all_indices(self, *columns):
-        #check for duplicated rid
-        rid = self.locate(self.key, columns[self.key + NUM_HIDDEN_COLUMNS])
+        rid = self.locate(self.key, columns[NUM_HIDDEN_COLUMNS + self.key])
         if rid != None:
-            return False
+            raise ValueError(f"Column with key: {columns[NUM_HIDDEN_COLUMNS + self.key]} already exists.")
+        
+        recird_rid = columns[RID_COLUMN]
         for i in range(NUM_HIDDEN_COLUMNS, len(columns)):
             if self.indices[i - NUM_HIDDEN_COLUMNS] != None:
+                self.indices[i - NUM_HIDDEN_COLUMNS][columns[i]][recird_rid] = True
 
-                #if column value is already in hash table, append rid, if not create new mapping 
-                #for column value
-                if columns[i] in self.indices[i - NUM_HIDDEN_COLUMNS]:
-                    self.indices[i - NUM_HIDDEN_COLUMNS][columns[i]].add(columns[RID_COLUMN])
-                else:
-                    self.indices[i - NUM_HIDDEN_COLUMNS][columns[i]] = set()
-                    self.indices[i - NUM_HIDDEN_COLUMNS][columns[i]].add(columns[RID_COLUMN])
-        return True
 
     """
     # Remove element associated with rid : primary key from all indices
