@@ -30,25 +30,18 @@ class Query:
         base_rid = self.table.index.locate(self.table.key, primary_key)
         if(base_rid is None):
             return False  # Record does not exist
-        
-        # Try to delete the element associated with rid from all indices. Return false if can't
-        try:
-            self.table.index.delete_from_all_indices(primary_key)
-    
-        except ValueError:
-            return False
 
         # Start from the base record, we iterate through every indirection column 
-        base_page_index, base_page_slot = self.table.page_directory[base_rid][0]
+        base_page_index, base_page_slot = self.table.page_directory[base_rid[0]][0]
         # Record marked for deletion, we write the deletion flag to the base page
         self.table.base_pages[RID_COLUMN][base_page_index].write_precise(base_page_slot, RECORD_DELETION_FLAG)
         indirection_rid = self.table.base_pages[INDIRECTION_COLUMN][base_page_index].get(base_page_slot)
         column_page_locations = self.table.page_directory[indirection_rid]
 
-        self.table.diallocation_rid_queue.put(base_rid)
+        self.table.diallocation_rid_queue.put(base_rid[0])
 
         # As long as we don't interate back to the base record or the indirection points to None, we have records we need to go through
-        while(indirection_rid != base_rid or indirection_rid is not None):
+        while(indirection_rid != base_rid[0] and indirection_rid is not None):
 
             # Add the indirection rid to the list to delete
             self.table.diallocation_rid_queue.put(indirection_rid)
