@@ -56,12 +56,6 @@ class Index:
             self.indices[column_number] = None
 
     """
-    # Update new RID for all indices when a record is updated
-    """
-    def update_all_indices(self, primary_key, prev_columns, *columns):
-        rid = self.locate(self.key, primary_key)
-
-    """
     # Search for values with RID in the parameter in indices
     """
     def search_value(self, column, rid):
