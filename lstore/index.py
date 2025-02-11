@@ -65,6 +65,7 @@ class Index:
                 self.indices[i][columns[NUM_HIDDEN_COLUMNS + i]][rid[0]] = True
 
     def insert_to_index(self, column_index, column_value, rid):
+        '''Used to insert the primary key for primary key indexing'''
         index:OOBTree = self.indices[column_index]
 
 
