@@ -4,8 +4,6 @@ A data strucutre holding indices for various columns of a table. Key column shou
 from lstore.config import *
 from BTrees.OOBTree import OOBTree
 
-from BTrees.OOBTree import OOBTree
-
 class Index:
 
     def __init__(self, table):
@@ -18,7 +16,7 @@ class Index:
         self.key = table.key
 
         self.create_index(self.key)
-        self.table = table
+        #self.table = table
         #only need primary index
         #for i in range(table.num_columns):
         #    self.create_index(i)
@@ -86,6 +84,21 @@ class Index:
                     return self.table.tail_pages[column_number][page_index].get(page_slot)
         return None
     """
+    
+    def delete_from_index(self, column_index, column_value, rid):
+        '''Used to delete a single value from an index'''
+        index:OOBTree = self.indices[column_index]
+
+
+        if (index is None):
+            raise IndexError("No indicy in the specified column")
+        
+
+        if (index.get(column_value)):
+            del index[column_value][rid]
+        else:
+            raise ValueError("Value not found in index")
+
     def insert_to_index(self, column_index, column_value, rid):
         '''Used to insert the primary key for primary key indexing'''
         index:OOBTree = self.indices[column_index]
