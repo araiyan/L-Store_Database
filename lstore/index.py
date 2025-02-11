@@ -161,7 +161,7 @@ class Index:
     """
     def delete_from_all_indices(self, primary_key):
         rid = self.indices[self.key][primary_key]
-        if rid != None:
+        if rid == None:
             return False
         for i in range(0, self.num_columns):
             if self.indices[i] != None:
@@ -171,8 +171,8 @@ class Index:
                 else:
                     #value = self.search_value(primary_key, temp_rid, i + NUM_HIDDEN_COLUMNS)
                     value = self.search_value(self.indices[i],rid)
-
-                #discard rid from the set, if it became empty set, delete the value too
+                    
+                #discard rid from the set, if it became empty set, delete the value too                
                 self.indices[i][value].discard(list(rid)[0])
                 if self.indices[i][value] == set():
                     del self.indices[i][value]
