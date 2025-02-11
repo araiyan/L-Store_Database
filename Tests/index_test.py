@@ -67,9 +67,14 @@ class TestIndexMethods(unittest.TestCase):
         r5 = [0,record5.rid,0,0, record5.columns[0], record5.columns[1], record5.columns[2], record5.columns[3]]
         index.update_all_indices(103, *r5)
 
+        rid = index.locate(table.key, 103)
+        print(f"Updated again key 103 RID: {rid}")
+
         # Test locate after update
-        rid = index.locate(2, 20)
-        self.assertEqual(rid, [record1.rid, record3.rid])
+        # removed this test bc we're only indexing keys
+        # can test this if you uncomment creating all indices in __init__ in index
+        #rid = index.locate(2, 20)
+        #self.assertEqual(rid, [record1.rid, record5.rid])
 
         rid = index.locate(table.key, 103)
         print(f"Updated again key 103 RID: {rid}")
@@ -88,8 +93,5 @@ class TestIndexMethods(unittest.TestCase):
         # Should raise error since key 200 doesn't exist
         # index.delete_from_all_indices(200)
 
-        # Prints column values in 2 tuple (rid, value)
-        for index in index.indices:
-            print(index)
 
 unittest.main()
