@@ -307,9 +307,62 @@ class Query:
     """
     def sum_version(self, start_range, end_range, aggregate_column_index, relative_version):
         records_list = self.table.index.locate_range(start_range, end_range, self.table.key)
+
+        if records_list is None:
+            return False
+
         sum_total = 0
         for rid in records_list:
-            pass
+            aggregate_column_value = None
+            consolidated_stack, indirection_rid = self.__grab_consolidated_stack(rid)
+            # store the (base) page# and index# that the RID/row is located
+
+            consolidated_rid, consolidated_timestamp = consolidated_stack.pop()
+
+            # print(f"RID: {rid}, Base RID: {consolidated_rid}, Timestamp: {consolidated_timestamp}, Indirection RID: {indirection_rid}")
+
+            # traverse through the tail pages based on the relative version
+            current_version = 0
+            page_locations = self.table.page_directory[indirection_rid]
+            while (indirection_rid != rid and current_version > relative_version):
+                current_version -= 1
+                indirection_rid = self.table.grab_tail_value_from_page_location(page_locations, INDIRECTION_COLUMN)
+                tail_timestamp = self.table.grab_tail_value_from_page_location(page_locations, TIMESTAMP_COLUMN)
+
+                # Skip over newer consolidated pages
+                if (consolidated_timestamp > tail_timestamp):
+                    consolidated_rid, consolidated_timestamp = consolidated_stack.pop()
+
+                page_locations = self.table.page_directory[indirection_rid]
+
+            #print("Consolidated stack", consolidated_stack)
+            #print("page Locations", page_locations)
+            if (len(page_locations) > 1):
+
+                tail_timestamp = self.table.grab_tail_value_from_page_location(page_locations, TIMESTAMP_COLUMN)
+
+                while (indirection_rid != rid and tail_timestamp >= consolidated_timestamp and aggregate_column_value is None):
+                    tail_timestamp = self.table.grab_tail_value_from_page_location(page_locations, TIMESTAMP_COLUMN)
+                    schema_column = self.table.grab_tail_value_from_page_location(page_locations, SCHEMA_ENCODING_COLUMN)
+
+                    
+                    if (((schema_column >> aggregate_column_index) & 1 == 1)):
+                        aggregate_column_value = self.table.grab_tail_value_from_page_location(page_locations, NUM_HIDDEN_COLUMNS + aggregate_column_index)
+
+                    
+
+                    indirection_rid = self.table.grab_tail_value_from_page_location(page_locations, INDIRECTION_COLUMN)
+                    page_locations = self.table.page_directory[indirection_rid]
+
+            # if we were unsuccessful in finding an older version - this implies that indirection_rid == rid and we can
+            # thus directly retrieve from the base/consolidated page
+
+            if (aggregate_column_value is None):
+                consolidated_page_location = self.table.page_directory.get(consolidated_rid, None)
+                consolidated_page_index, consolidated_page_slot = consolidated_page_location[0]
+                aggregate_column_value = self.table.base_pages[NUM_HIDDEN_COLUMNS + aggregate_column_index][consolidated_page_index].get(consolidated_page_slot)
+                    
+            sum_total += aggregate_column_value
         
 
        # return sum_total
