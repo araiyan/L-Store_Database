@@ -266,7 +266,8 @@ class Query:
         # Grabs all records rid
         # TODO: If each indicy is a binary tree we need to iterate through the binary tree and grab all rids
        
-        all_rids = self.table.index.locate_range(self,  aggregate_column_index, start_range, end_range)
+        # Get all record RIDs in the range using the **primary key index**        
+        all_rids = self.table.index.locate_range(start_range, end_range, self.table.key)
        
        
         if not all_rids:
@@ -317,8 +318,8 @@ class Query:
         
        # return sum_total
        
-       # Get all record RIDs in the range
-        all_rids = self.table.index.locate_range(start_range, end_range, aggregate_column_index)
+       # Get all record RIDs in the range using the **primary key index**        
+        all_rids = self.table.index.locate_range(start_range, end_range, self.table.key)
        
         if not all_rids:
             return False  # Return False if no records exist in range
@@ -350,6 +351,7 @@ class Query:
             latest_value = self.get_column_value(page_index, page_slot, aggregate_column_index)
             total_sum += latest_value  # Accumulate the sum
  
+ 
         return total_sum if total_sum != 0 else False
  
     """
@@ -359,6 +361,14 @@ class Query:
     :param column: the column to increment
     # Returns True is increment is successful
     # Returns False if no record matches key or if target record is locked by 2PL.
+    """
+    def get_column_value(self, page_index, page_slot, column_index):
+   
+        return self.table.pages[page_index][column_index][page_slot]  # Retrieve value from in-memory storage
+    
+    """
+    Retrieves a column value from a page.
+    Assumes the table has a dictionary `pages` storing data.
     """
     def increment(self, key, column):
         r = self.select(key, self.table.key, [1] * self.table.num_columns)[0]
