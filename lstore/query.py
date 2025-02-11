@@ -310,14 +310,48 @@ class Query:
     # Returns False if no record exists in the given range
     """
     def sum_version(self, start_range, end_range, aggregate_column_index, relative_version):
-        records_list = self.table.index.locate_range(start_range, end_range, self.table.key)
-        sum_total = 0
-        for rid in records_list:
-            pass
+       # records_list = self.table.index.locate_range(start_range, end_range, self.table.key)
+       # sum_total = 0
+       # for rid in records_list:
+       #     pass
         
-        return sum_total
-
-    
+       # return sum_total
+       
+       # Get all record RIDs in the range
+        all_rids = self.table.index.locate_range(start_range, end_range, aggregate_column_index)
+       
+        if not all_rids:
+            return False  # Return False if no records exist in range
+ 
+        total_sum = 0  # Initialize sum
+ 
+        for base_rid in all_rids:
+            # Get base record location
+            if base_rid not in self.table.page_directory:
+                continue  # Skip if RID not found
+ 
+            page_index, page_slot = self.table.page_directory[base_rid]
+ 
+            # Follow the version chain based on `relative_version`
+            current_rid = base_rid
+            for _ in range(relative_version):
+                indirection = self.get_column_value(page_index, page_slot, self.table.indirection_column_index)
+ 
+                if indirection is None or indirection == 0:
+                    break  # Stop if no further versions exist
+ 
+                current_rid = indirection
+                if current_rid not in self.table.page_directory:
+                    break  # Stop if no valid RID found
+ 
+                page_index, page_slot = self.table.page_directory[current_rid]
+ 
+            # Get the value at the requested version
+            latest_value = self.get_column_value(page_index, page_slot, aggregate_column_index)
+            total_sum += latest_value  # Accumulate the sum
+ 
+        return total_sum if total_sum != 0 else False
+ 
     """
     Increments one column of the record
     this implementation should work if your select and update queries already work
