@@ -2,7 +2,6 @@ from lstore.config import *
 import struct
 
 class Page:
-
     def __init__(self):
         self.num_records = 0
         self.data = bytearray(PAGE_SIZE)
@@ -25,6 +24,12 @@ class Page:
     def get(self, index):
         '''This funciton should be able to grab a data located at a certain index in the page'''
         return struct.unpack_from("i", self.data, index * INTEGER_BYTE_SIZE)[0]
+    
+    def serialize(self):
+        pass
+
+    def deserialize(self, json_data):
+        pass
 
 
 class PageRange:
