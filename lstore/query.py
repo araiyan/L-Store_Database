@@ -36,7 +36,7 @@ class Query:
         # Record marked for deletion, we write the deletion flag to the base page
         self.table.base_pages[RID_COLUMN][base_page_index].write_precise(base_page_slot, RECORD_DELETION_FLAG)
         self.table.diallocation_rid_queue.put(base_rid[0])
-        self.table.index.delete_from_index(self.table.key, primary_key, base_rid[0])
+        self.table.index.delete_from_all_indices(primary_key)
 
         # Deletion successful
         return True
@@ -63,7 +63,7 @@ class Query:
         record.columns = hidden_columns + list(columns)
         
         self.table.insert_record(record)
-        self.table.index.insert_to_index(self.table.key, columns[self.table.key], record.rid)
+        self.table.index.insert_in_all_indices(record.columns)
 
     
     """
@@ -229,6 +229,7 @@ class Query:
         self.table.base_pages[INDIRECTION_COLUMN][page_index].write_precise(page_slot, new_record.rid)        
 
         # Update successful
+        self.table.index.update_all_indices(primary_key, new_columns)
         # print("Update Successful\n")
         return True
     
