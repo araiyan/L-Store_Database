@@ -24,9 +24,15 @@ class Frame:
         '''If the Dirty bit is true we need to write to disk before discarding the frame'''
 
     def load_page(self, page_path:str):
-        page_json_data = json.load(page_path)
+        '''Loads a page from disk to memory
+        If the page is not found then it creates a new page'''
+
         self.page = Page()
-        self.page.deserialize(page_json_data)
+        if os.path.exists(page_path):
+            page_json_data = json.load(page_path)
+            self.page.deserialize(page_json_data)
+        else:
+            self.dirty = True
 
     def unload_page(self, page_path:str):
         if (self.pin > 0):
