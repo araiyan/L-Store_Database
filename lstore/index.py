@@ -4,6 +4,7 @@ A data strucutre holding indices for various columns of a table. Key column shou
 from lstore.config import *
 from BTrees.OOBTree import OOBTree
 import pickle
+import os
 
 class Index:
 
@@ -21,8 +22,10 @@ class Index:
         self.num_columns = table.num_columns
         self.key = table.key
 
+        self.path_to_value_mapper = os.path.join("DB Directory", table.name, "Index", "Value_Mapper.pkl")
+
         self.indices[self.key] = OOBTree()
-        #self.table = table
+        self.table = table
 
     """
     # returns the location of all records with the given value on column "column" as a list
@@ -31,30 +34,25 @@ class Index:
 
     #only use this to find rid when given primary key
     def locate(self, column, value):
-
-        #deserialize
-
         if value in self.indices[column]:
             rids = list(self.indices[column][value].keys())
         else:
             rids = []
-
-        #serialize
         return rids
     
+    """
+    # basically the same as locate and locate range except it returns value in designated column 
+    # instead of rid when given primary/secondary key and its column number
+    """
     def get(self, key_column_number, value_column_number, key):
-
-        #deserialize
 
         if (key_column_number, value_column_number) in self.secondary_index:
             values = list(self.secondary_index[key_column_number, value_column_number][key])
-
-            #serialize
-
             return values
+        
         else:
             values = []
-            for primary_key, column_values in self.value_mapper.items():
+            for _, column_values in self.value_mapper.items():
 
                 # get key and values from value mapper
                 value_mapper_key = column_values[key_column_number]
@@ -62,8 +60,25 @@ class Index:
                 if value_mapper_key == key:
                     values.append(value_mapper_value)
             
-            #serialize
+            return values
+        
+    def get_range(self, key_column_number, value_column_number, begin, end):
+        if (key_column_number, value_column_number) in self.secondary_index:
+            values = list(self.secondary_index[key_column_number, value_column_number].values(min=begin, max=end))
+            return [item for sublist in values for item in sublist]
 
+        else:
+            values = []
+            for primary_key, column_values in self.value_mapper.items():
+
+                # get key and values from value mapper
+                value_mapper_key = column_values[key_column_number]
+                value_mapper_value = column_values[value_column_number]
+
+                if begin <= value_mapper_key <= end:
+                    for item in value_mapper_value:
+                        values.append(item)
+            
             return values
 
     """
@@ -74,13 +89,7 @@ class Index:
     #only use for keys
 
     def locate_range(self, begin, end, column):
-
-        #deserialize
-
-        rids = [rid for sublist in self.indices[column].values(min=begin, max=end) for rid in sublist.keys()] or None
-
-        #serialize
-        return rids
+        return [rid for sublist in self.indices[column].values(min=begin, max=end) for rid in sublist.keys()] or None
 
     """
     # optional: Create index on specific columns 
@@ -88,8 +97,7 @@ class Index:
     # or {key_column_value1: [value_column_value1, value_column_value2...]} if more than one value maps to the same key
     """
     def create_index(self, key_column_number, value_column_number):
-
-        #deserialize
+        #deserialize value_mapper if lost
 
         if (key_column_number, value_column_number) not in self.secondary_index:
 
@@ -110,28 +118,20 @@ class Index:
                     btree[key] = [value]
 
             self.secondary_index[(key_column_number, value_column_number)] = btree
-
-            #serialize
-
             return self.secondary_index[(key_column_number, value_column_number)]
         else:
             raise IndexError(f"Index with key column: {key_column_number} and value column: {value_column_number} already exists.")
-
 
     """
     # optional: Drop index of specific column
     """
     def drop_index(self, key_column_number, value_column_number):
 
-        #deserialize
-
         # clears Btree and removes reference 
         if self.secondary_index[(key_column_number, value_column_number)] != None:
 
             self.secondary_index[(key_column_number, value_column_number)].clear()
             del self.secondary_index[(key_column_number, value_column_number)]
-
-        #somehow remove the index file from disk
 
         # if the index trying to drop doesn't exist in the dict of secondary indices
         else:
@@ -142,11 +142,9 @@ class Index:
         '''Used to delete a single value from an index'''
         index:OOBTree = self.indices[column_index]
 
-
         if (index is None):
             raise IndexError("No indicy in the specified column")
         
-
         if (index.get(column_value)):
             del index[column_value]
         else:
@@ -168,14 +166,12 @@ class Index:
     # Takes a record and insert it into value_mapper, primary and secondary index
     """
     def insert_in_all_indices(self, columns):
-
-        #deserialize
         
         primary_key = columns[self.key + NUM_HIDDEN_COLUMNS]
         if self.indices[self.key].get(primary_key):
             raise ValueError(f"Column with key: {columns[NUM_HIDDEN_COLUMNS + self.key]} already exists.")
         
-        # insert in primary index 
+        # insert in primary index
         self.insert_to_index(self.key, primary_key, columns[RID_COLUMN])
 
         # map to value mapper
@@ -194,21 +190,17 @@ class Index:
             else:
                 index[key] = [value]
 
-        #serialize
         return True
-
 
     """
     # Remove element associated with primary key from value_mapper, primary and secondary index
     """
     def delete_from_all_indices(self, primary_key):
 
-        #deserialize
-
         if not self.indices[self.key].get(primary_key):
             raise ValueError(f"Column with key: {primary_key} does not exist.")
         
-        #delete from primary index 
+        #delete from primary index
         self.delete_from_index(self.key, primary_key)
 
         # if we have secondary index, delete from those too
@@ -227,16 +219,12 @@ class Index:
         deleted_column = self.value_mapper[primary_key]
         del self.value_mapper[primary_key]
 
-        #serialize
-
         return deleted_column
     
     """
     # Update to value_mapper and secondary index
     """
     def update_all_indices(self, primary_key, columns):
-
-        #deserialize
 
         #get rid from primary key
         if not self.indices[self.key].get(primary_key):
@@ -272,27 +260,39 @@ class Index:
 
                 self.value_mapper[primary_key][i] = columns[i + NUM_HIDDEN_COLUMNS]
 
-        #serialize
-
         return True
     
-    # need to figure out path (?)
     """
     referencing from Raiyan's bufferpool directory in disk
 
     DB Directory: Folder
        -> TableName: Folder
           -> Index: Folder
-            -> Primary_Index
-            -> Value_Mapper    folder? or files?
-            -> Secondary_Index: Folder   if we decide to create any
-               -> Index_{key_column_number}_{value_column_number}      
+            -> Value_Mapper
     """
-    def serialize(self, path, data):
-        with open(path, 'wb') as file:
-            pickle.dump(data, file)
+        
+    # use this when open db
+    def generate_primary_index(self):
+        for i in range(len(self.table.base_pages)):
+            for j in range(MAX_RECORD_PER_PAGE):
+                primary_key = self.table.base_pages[NUM_HIDDEN_COLUMNS + self.table.key][i].get(j)
+                rid = self.table.base_pages[RID_COLUMN][i].get(j)
+                self.indices[self.key] = OOBTree()
+                self.insert_to_index(self.key, primary_key, rid)
+    
+    # use this when open db
+    def deserialize_value_mapper(self):
+        if os.path.exists(self.path_to_value_mapper):
+            with open(self.path_to_value_mapper, 'rb') as file:
+                self.value_mapper = pickle.load(file)
+        else:
+            raise FileNotFoundError("File at {path} cannot be deserialized because it does not exist.")
 
+    #use this when close db
+    def serialize_value_mapper(self):
+        index_directory = os.path.dirname(self.path_to_value_mapper)
+        if not os.path.exists(index_directory):
+            os.makedirs(index_directory)
 
-    def deserialize(self, path):
-        with open(path, 'rb') as file:
-            return pickle.load(file)
+        with open(self.path_to_value_mapper, 'wb') as file:
+            pickle.dump(self.value_mapper, file)

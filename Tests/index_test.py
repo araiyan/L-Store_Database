@@ -57,17 +57,20 @@ class TestIndexMethods(unittest.TestCase):
         print(f"Key 200 RID: {rid}")
 
         r4 = [0,record4.rid,0,0, record4.columns[0], record4.columns[1], record4.columns[2], record4.columns[3]]
-        index.update_all_indices(103, *r4)
+        index.update_all_indices(103, r4)
         print(dict(index_age_to_grade))
 
         # Should raise error since key 200 doesn't exist
         # index.update_all_indices(200, *r4)
 
         r5 = [0,record5.rid,0,0, record5.columns[0], record5.columns[1], record5.columns[2], record5.columns[3]]
-        index.update_all_indices(103, *r5)
+        index.update_all_indices(103, r5)
 
         grades = index.get(2,3,20)
         print(f"grades of students age: 20 : {grades}")
+
+        grades = index.get_range(2,3,20,50)
+        print(f"grades of students age: 20-50 : {grades}")
 
         #get something not in secondary index
         age = index.get(3, 2, 83)
