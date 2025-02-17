@@ -67,9 +67,23 @@ class Database():
                                             print(f"Loaded {file} into bufferpool for table {table_name}")
 
     def close(self):
-        """Flushes dirty pages back to disk and saves table metadata"""
+        """Flushes dirty pages back to disk, saves table metadata and shuts down"""
         if not self.path:
             raise ValueError("Database path is not set. Use open() before closing.")
+        
+        self._serialize()
+
+        # flush bufferpool and clear memory
+        for frame_num in list(self.bufferpool.frame_directory.values()):
+            frame = self.bufferpool.frames[frame_num]
+            if frame.dirty:
+                frame.unload_page()
+        self.bufferpool = None
+
+    def _serialize(self):
+        """Flushes dirty pages back to disk and saves table metadata"""
+        if not self.path:
+            raise ValueError("Database path is not set. Use open() before serializing.")
         
         tables_metadata = {}
 
@@ -107,15 +121,6 @@ class Database():
             tables_metadata_path = os.path.join(self.path, "tables.json")
             with open(tables_metadata_path, "w") as file:
                 json.dump(tables_metadata, file, indent=4)
-
-            # flush bufferpool and clear memory
-            for frame_num in list(self.bufferpool.frame_directory.values()):
-                frame = self.bufferpool.frames[frame_num]
-                if frame.dirty:
-                    frame.unload_page()
-            self.bufferpool = None
-
-
     """
     # Creates a new table
     :param name: string         #Table name
