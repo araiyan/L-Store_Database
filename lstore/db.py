@@ -21,7 +21,7 @@ class Database():
         if not os.path.exists(path):
             os.makedirs(path)
         
-        # grab table metadata - we assume that input path contains subpath to tables.json
+        # grab table metadata
         tables_metadata_path = os.path.join(path, "tables.json")
         if os.path.exists(tables_metadata_path):
             with open(tables_metadata_path, "r") as file:
@@ -67,7 +67,54 @@ class Database():
                                             print(f"Loaded {file} into bufferpool for table {table_name}")
 
     def close(self):
-        pass
+        """Flushes dirty pages back to disk and saves table metadata"""
+        if not self.path:
+            raise ValueError("Database path is not set. Use open() before closing.")
+        
+        tables_metadata = {}
+
+        # save table metadata
+        for table_name, table in self.tables.items():
+            table_path = os.path.join(self.path, table_name)
+            if not os.path.exists(table_path):
+                os.makedirs(table_path)
+            
+            tables_metadata[table_name] = {
+                "num_columns": table.num_columns,
+                "key_index": table.key,
+                "page_directory": table.page_directory,
+                "indexes": {col: table.index.indices[col] for col in range(table.num_columns) if table.index.indices[col]}
+            }
+
+            # flush all pages to disk
+            for page_range_index in range(len(table.page_directory)):
+                page_range_path = os.path.join(table_path, f"PageRange_{page_range_index}")
+                if not os.path.exists(page_range_path):
+                    os.makedirs(page_range_path)
+                
+                for column_idx in range(table.num_columns):
+                    for page_idx in range(len(table.base_pages[column_idx])):
+
+                        # grab page from bufferpool
+                        page, frame_num = self.bufferpool.get_page(page_range_index, column_idx, page_idx)
+                        if page:
+                            file_path = os.path.join(page_range_path, f"Page_{column_idx}_{page_idx}.bin")
+                            with open(file_path, "wb") as file:
+                                file.write(page.data)
+                            self.bufferpool.mark_frame_used(frame_num)
+            
+            # write tables.json
+            tables_metadata_path = os.path.join(self.path, "tables.json")
+            with open(tables_metadata_path, "w") as file:
+                json.dump(tables_metadata, file, indent=4)
+
+            # flush bufferpool and clear memory
+            for frame_num in list(self.bufferpool.frame_directory.values()):
+                frame = self.bufferpool.frames[frame_num]
+                if frame.dirty:
+                    frame.unload_page()
+            self.bufferpool = None
+
 
     """
     # Creates a new table
