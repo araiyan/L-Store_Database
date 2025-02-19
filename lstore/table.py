@@ -285,9 +285,10 @@ class Table:
                             column_index = int(parts[1])
                             page_index = int(parts[2].split(".")[0])
 
-                            page_disk_path = os.path.join(self.table_path, page_range, file)
+                            frame = self.bufferpool.get_page_frame(page_range_index, column_index, page_index)
 
-                            self.bufferpool.__load_new_frame(page_disk_path)
-
-                            print(f"Preloaded {file} into bufferpool for table {self.name}")
+                            if frame:
+                                print(f"Preloaded {file} into bufferpool for table {self.name}")
+                            else:
+                                raise ValueError(f"Could not preload {file} (Bufferpool full or error)")
 
