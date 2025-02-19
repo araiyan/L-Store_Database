@@ -260,7 +260,7 @@ class Table:
         for i in range(self.total_num_columns):
             self.tail_pages_prev_merge[i] = len(self.tail_pages[i]) - 1
         
-    def __serialize(self):
+    def serialize(self):
         """Returns table metadata as a JSON-compatible dictionary"""
         return {
             "num_columns": self.num_columns,

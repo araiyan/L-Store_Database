@@ -30,11 +30,13 @@ class Database():
 
                 # loops through tables and adds them to the self.tables dictionary
                 for table_name, table_info in tables_metadata.items():
-                    table = Table(table_name, table_info["num_columns"], table_info["key_index"])
+                    table = Table(table_name, table_info["num_columns"], table_info["key_index"], self.path)
                     self.tables[table_name] = table
 
-                    # restores page directory for table
-                    table.page_directory = table_info["page_directory"]
+                    # restores page directory for table - converts keys back into correct data type (string --> integer)
+                    table.page_directory = {}
+                    for k, v in table_info["page_directory"].items():
+                        table.page_directory[int(k)] = v
 
                     # initialize indexes for table
                     table.index = Index(table)
@@ -60,7 +62,7 @@ class Database():
                     frame.unload_page()
 
             # serialize table metadata
-            tables_metadata[table_name] = table.__serialize()
+            tables_metadata[table_name] = table.serialize()
 
         # save all tables' metadata to disk
         tables_metadata_path = os.path.join(self.path, "tables.json")
@@ -122,7 +124,10 @@ class Database():
         if self.tables.get(name) is not None:
             raise NameError(f"Error creating Table! Following table already exists: {name}")
         
-        self.tables[name] = Table(name, num_columns, key_index)
+        if self.path is None:
+            raise ValueError("Database path is not set. Use open() before creating a table.")
+
+        self.tables[name] = Table(name, num_columns, key_index, self.path)
         return self.tables[name]
 
     
