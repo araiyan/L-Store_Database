@@ -9,13 +9,14 @@ class Database():
     def __init__(self):
         self.tables:dict = {}
         self.path = None
-        self.bufferpool = None
         pass
 
     def open(self, path):
         """Loads database from disk and restores tables, indexes, and pages"""
         self.path = path
-        self.bufferpool = Bufferpool(path)
+
+        # handle bufferpool initilization in table instead / each table manages its own bufferpool
+        # self.bufferpool = Bufferpool(path)
 
         # create new path if database path doesn't exist
         if not os.path.exists(path):
@@ -43,7 +44,7 @@ class Database():
                         # loop through inner dictionary and load stored values into the created index
                         for value, rids in indexed_values.items():
                             for rid in rids:
-                                table.index.insert_to_index(int(column_idx, value, rid))
+                                table.index.insert_to_index(int(column_idx), value, rid)
 
                     # load pages from disk
                     table_path = os.path.join(path, table_name)
@@ -62,7 +63,7 @@ class Database():
                                         page_index = int(parts[2].split(".")[0])
 
                                         # load page into bufferpool
-                                        page, frame_num = self.bufferpool.get(page_range_index, column_index, page_index)
+                                        page, frame_num = self.bufferpool.get_page(page_range_index, column_index, page_index)
                                         if page is not None:
                                             print(f"Loaded {file} into bufferpool for table {table_name}")
 
@@ -121,6 +122,7 @@ class Database():
             tables_metadata_path = os.path.join(self.path, "tables.json")
             with open(tables_metadata_path, "w") as file:
                 json.dump(tables_metadata, file, indent=4)
+
     """
     # Creates a new table
     :param name: string         #Table name

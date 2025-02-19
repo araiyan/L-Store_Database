@@ -2,6 +2,8 @@ from lstore.index import Index
 from lstore.page import Page
 from time import time
 from lstore.config import *
+from lstore.bufferpool import Bufferpool
+import os
 
 import queue
 
@@ -23,16 +25,21 @@ class Table:
     :param num_columns: int     #Number of Columns: all columns are integer
     :param key: int             #Index of table key in columns
     """
-    def __init__(self, name, num_columns, key):
+    def __init__(self, name, num_columns, key, db_path):
         if (key < 0 or key >= num_columns):
             raise ValueError("Error Creating Table! Primary Key must be within the columns of the table")
 
         self.name = name
         self.key = key
+        self.db_path = db_path
+        self.table_path = os.path.join(db_path, name)
         self.num_columns = num_columns
         self.total_num_columns = num_columns + NUM_HIDDEN_COLUMNS
         self.page_directory = {}
         self.index = Index(self)
+
+        # initialize bufferpool in table, not DB
+        self.bufferpool = Bufferpool(self.table_path)
         
         self.base_pages = {}
         self.tail_pages = {}
@@ -252,5 +259,44 @@ class Table:
         for i in range(self.total_num_columns):
             self.tail_pages_prev_merge[i] = len(self.tail_pages[i]) - 1
         
+    def __serialize(self):
+        """Flushes dirty pages back to disk and saves table metadata"""
+        if not self.table_path:
+            raise ValueError(f"Table paht is not set for table {self.name}. Cannot serialize.")
+        tables_metadata = {}
 
+        # save table metadata
+        for table_name, table in self.tables.items():
+            table_path = os.path.join(self.path, table_name)
+            if not os.path.exists(table_path):
+                os.makedirs(table_path)
+            
+            tables_metadata[table_name] = {
+                "num_columns": table.num_columns,
+                "key_index": table.key,
+                "page_directory": table.page_directory,
+                "indexes": {col: table.index.indices[col] for col in range(table.num_columns) if table.index.indices[col]}
+            }
+
+            # flush all pages to disk
+            for page_range_index in range(len(table.page_directory)):
+                page_range_path = os.path.join(table_path, f"PageRange_{page_range_index}")
+                if not os.path.exists(page_range_path):
+                    os.makedirs(page_range_path)
+                
+                for column_idx in range(table.num_columns):
+                    for page_idx in range(len(table.base_pages[column_idx])):
+
+                        # grab page from bufferpool
+                        page, frame_num = self.bufferpool.get_page(page_range_index, column_idx, page_idx)
+                        if page:
+                            file_path = os.path.join(page_range_path, f"Page_{column_idx}_{page_idx}.bin")
+                            with open(file_path, "wb") as file:
+                                file.write(page.data)
+                            self.bufferpool.mark_frame_used(frame_num)
+            
+            # write tables.json
+            tables_metadata_path = os.path.join(self.path, "tables.json")
+            with open(tables_metadata_path, "w") as file:
+                json.dump(tables_metadata, file, indent=4)
  
