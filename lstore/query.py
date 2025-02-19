@@ -366,19 +366,42 @@ class Query:
             '''
             if (len(page_locations) > 1):
 
-                tail_timestamp = self.table.grab_tail_value_from_page_location(page_locations, TIMESTAMP_COLUMN)
+                tail_page_range = None
+                tail_tuple = self.__getPageTuple(tail_page_range, TIMESTAMP_COLUMN, page_locations[1])
+                tail_frame, frame_num = tail_tuple
+                tail_timestamp = tail_frame.page.get(page_locations[1])
+                self.bufferpool.mark_frame_used(tail_frame_num)
 
                 while (indirection_rid != rid and tail_timestamp >= consolidated_timestamp and aggregate_column_value is None):
-                    tail_timestamp = self.table.grab_tail_value_from_page_location(page_locations, TIMESTAMP_COLUMN)
-                    schema_column = self.table.grab_tail_value_from_page_location(page_locations, SCHEMA_ENCODING_COLUMN)
+                    
+                    tail_page_range = None
+                    tail_tuple = self.__getPageTuple(tail_page_range, TIMESTAMP_COLUMN, page_locations[1])
+                    tail_frame, tail_frame_num = tail_tuple
+                    tail_timestamp = tail_frame.page.get(page_locations[1])
+                    
+                    schema_page_range = None
+                    schema_tuple = self.__getPageTuple(schema_page_range, SCHEMA_ENCODING_COLUMN, page_locations[1])
+                    schema_frame, schema_frame_num = schema_tuple
+                    schema_column = schema_frame.page.get(page_locations[1])
 
+                    self.bufferpool.mark_frame_used(schema_frame_num)
+                    self.bufferpool.mark_frame_used(tail_frame_num)
                     
                     if (((schema_column >> aggregate_column_index) & 1 == 1)):
-                        aggregate_column_value = self.table.grab_tail_value_from_page_location(page_locations, NUM_HIDDEN_COLUMNS + aggregate_column_index)
+                        
+                        col_page_range = None
+                        col_tuple = self.__getPageTuple(col_page_range, NUM_HIDDEN_COLUMNS + aggregate_column_index, page_locations[1])
+                        col_frame, col_frame_num = col_tuple
+                        aggregate_column_value = col_frame.page.get(page_locations[1])
+                        self.bufferpool.mark_frame_used(col_frame_num)
 
                     
+                    indir_page_range = None
+                    indir_tuple = self.__getPageTuple(indir_page_range, INDIRECTION_COLUMN, page_locations[1])
+                    indir_frame, indir_frame_num = indir_tuple
+                    indirection_rid = indir_frame.page.get(page_locations[1])
+                    self.bufferpool.mark_frame_used(indir_frame_num)
 
-                    indirection_rid = self.table.grab_tail_value_from_page_location(page_locations, INDIRECTION_COLUMN)
                     page_locations = self.table.page_directory[indirection_rid]
             '''
 
