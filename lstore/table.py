@@ -40,6 +40,7 @@ class Table:
 
         # initialize bufferpool in table, not DB
         self.bufferpool = Bufferpool(self.table_path)
+        self.preload_pages()
         
         self.base_pages = {}
         self.tail_pages = {}
@@ -260,43 +261,33 @@ class Table:
             self.tail_pages_prev_merge[i] = len(self.tail_pages[i]) - 1
         
     def __serialize(self):
-        """Flushes dirty pages back to disk and saves table metadata"""
-        if not self.table_path:
-            raise ValueError(f"Table paht is not set for table {self.name}. Cannot serialize.")
-        tables_metadata = {}
-
-        # save table metadata
-        for table_name, table in self.tables.items():
-            table_path = os.path.join(self.path, table_name)
-            if not os.path.exists(table_path):
-                os.makedirs(table_path)
-            
-            tables_metadata[table_name] = {
-                "num_columns": table.num_columns,
-                "key_index": table.key,
-                "page_directory": table.page_directory,
-                "indexes": {col: table.index.indices[col] for col in range(table.num_columns) if table.index.indices[col]}
+        """Returns table metadata as a JSON-compatible dictionary"""
+        return {
+            "num_columns": self.num_columns,
+            "key_index": self.key,
+            "page_directory": self.page_directory,
+            "indexes": {
+                col: self.index.indices[col] for col in range(self.num_columns) if self.index.indices[col]
             }
+        }
+    
+    def preload_pages(self):
+        """Preloads pages into Bufferpool when table is initialized"""
+        if os.path.exists(self.table_path):
+            for page_range in os.listdir(self.table_path):
+                page_range_path = os.path.join(self.table_path, page_range)
+                if os.path.isdir(page_range_path) and page_range.startswith("PageRange_"):
+                    page_range_index = int(page_range.split("_")[1])
 
-            # flush all pages to disk
-            for page_range_index in range(len(table.page_directory)):
-                page_range_path = os.path.join(table_path, f"PageRange_{page_range_index}")
-                if not os.path.exists(page_range_path):
-                    os.makedirs(page_range_path)
-                
-                for column_idx in range(table.num_columns):
-                    for page_idx in range(len(table.base_pages[column_idx])):
+                    for file in os.listdir(page_range_path):
+                        if file.startswith("Page_") and file.endswith(".bin"):
+                            parts = file.split("_")
+                            column_index = int(parts[1])
+                            page_index = int(parts[2].split(".")[0])
 
-                        # grab page from bufferpool
-                        page, frame_num = self.bufferpool.get_page(page_range_index, column_idx, page_idx)
-                        if page:
-                            file_path = os.path.join(page_range_path, f"Page_{column_idx}_{page_idx}.bin")
-                            with open(file_path, "wb") as file:
-                                file.write(page.data)
-                            self.bufferpool.mark_frame_used(frame_num)
-            
-            # write tables.json
-            tables_metadata_path = os.path.join(self.path, "tables.json")
-            with open(tables_metadata_path, "w") as file:
-                json.dump(tables_metadata, file, indent=4)
- 
+                            page_disk_path = os.path.join(self.table_path, page_range, file)
+
+                            self.bufferpool.__load_new_frame(page_disk_path)
+
+                            print(f"Preloaded {file} into bufferpool for table {self.name}")
+
