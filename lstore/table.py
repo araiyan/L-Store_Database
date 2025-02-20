@@ -2,6 +2,8 @@ from lstore.index import Index
 from lstore.page import Page
 from time import time
 from lstore.config import *
+from lstore.bufferpool import Bufferpool
+import os
 
 import queue
 
@@ -23,16 +25,22 @@ class Table:
     :param num_columns: int     #Number of Columns: all columns are integer
     :param key: int             #Index of table key in columns
     """
-    def __init__(self, name, num_columns, key):
+    def __init__(self, name, num_columns, key, db_path):
         if (key < 0 or key >= num_columns):
             raise ValueError("Error Creating Table! Primary Key must be within the columns of the table")
 
         self.name = name
         self.key = key
+        self.db_path = db_path
+        self.table_path = os.path.join(db_path, name)
         self.num_columns = num_columns
         self.total_num_columns = num_columns + NUM_HIDDEN_COLUMNS
         self.page_directory = {}
         self.index = Index(self)
+
+        # initialize bufferpool in table, not DB
+        self.bufferpool = Bufferpool(self.table_path)
+        self.preload_pages()
         
         self.base_pages = {}
         self.tail_pages = {}
@@ -252,5 +260,12 @@ class Table:
         for i in range(self.total_num_columns):
             self.tail_pages_prev_merge[i] = len(self.tail_pages[i]) - 1
         
+    def serialize(self):
+        """Returns table metadata as a JSON-compatible dictionary"""
+        return {
+            "num_columns": self.num_columns,
+            "key_index": self.key,
+            "page_directory": self.page_directory,
+            "rid_index": self.rid_index
+        }
 
- 
