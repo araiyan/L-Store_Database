@@ -1,10 +1,9 @@
 import sys
 sys.path.append("..")
 import unittest
-import os
 import shutil
 from lstore.db import Database
-from lstore.table import Table
+from BTrees.OOBTree import OOBTree
 
 class TestDatabaseOpenClose(unittest.TestCase):
 
@@ -62,10 +61,10 @@ class TestDatabaseOpenClose(unittest.TestCase):
         self.assertEqual(products_table.key, 0)
         self.assertEqual(products_table.page_directory, {2: "PageData3"})
 
-        self.assertIn(2, users_table.index.indices)
-        self.assertIn(3, orders_table.index.indices)
-        self.assertEqual(users_table.index.indices[2][50], [1])
-        self.assertEqual(orders_table.index.indices[3][99], [2]) 
+        self.assertIsInstance(users_table.index.indices[2], OOBTree)
+        self.assertIsInstance(orders_table.index.indices[3], OOBTree)
+        self.assertEqual(users_table.index.indices[2][50], {1: True})
+        self.assertEqual(orders_table.index.indices[3][99], {2: True}) 
 
     def tearDown(self):
         """Remove the test database directory after tests"""
