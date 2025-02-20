@@ -268,25 +268,4 @@ class Table:
             "page_directory": self.page_directory,
             "rid_index": self.rid_index
         }
-    
-    def preload_pages(self):
-        """Preloads pages into Bufferpool when table is initialized"""
-        if os.path.exists(self.table_path):
-            for page_range in os.listdir(self.table_path):
-                page_range_path = os.path.join(self.table_path, page_range)
-                if os.path.isdir(page_range_path) and page_range.startswith("PageRange_"):
-                    page_range_index = int(page_range.split("_")[1])
-
-                    for file in os.listdir(page_range_path):
-                        if file.startswith("Page_") and file.endswith(".bin"):
-                            parts = file.split("_")
-                            column_index = int(parts[1])
-                            page_index = int(parts[2].split(".")[0])
-
-                            frame = self.bufferpool.get_page_frame(page_range_index, column_index, page_index)
-
-                            if frame:
-                                print(f"Preloaded {file} into bufferpool for table {self.name}")
-                            else:
-                                raise ValueError(f"Could not preload {file} (Bufferpool full or error)")
 

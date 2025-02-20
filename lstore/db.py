@@ -42,21 +42,6 @@ class Database():
                     # initialize indexes for table
                     table.index = Index(table)
                     
-                    # NO NEED TO MANUALLY DESERIALIZE FOR INDEXES
-                    # ---------------------------------------------
-                    # for column_idx, indexed_values in table_info["indexes"].items():
-                    #     column_idx = int(column_idx)
-
-                    #     # only restore if there were stored values
-                    #     if indexed_values:  
-                    #         restored_tree = OOBTree()
-                    #         for value, rids in indexed_values.items():
-
-                    #             # ensure column key and values are integers (JSON converts them to strings)
-                    #             restored_tree[int(value)] = {int(rid): True for rid in rids} 
-                    #         table.index.indices[column_idx] = restored_tree
-                    #     else:
-                    #         table.index.indices[column_idx] = None  # explicitly set to None for unindexed column
 
     def close(self):
         """Flushes dirty pages back to disk, saves table metadata and shuts down"""
@@ -85,47 +70,6 @@ class Database():
         # clear memory references
         self.tables = {}
 
-    # def _serialize(self):
-    #     """Flushes dirty pages back to disk and saves table metadata"""
-    #     if not self.path:
-    #         raise ValueError("Database path is not set. Use open() before serializing.")
-        
-    #     tables_metadata = {}
-
-    #     # save table metadata
-    #     for table_name, table in self.tables.items():
-    #         table_path = os.path.join(self.path, table_name)
-    #         if not os.path.exists(table_path):
-    #             os.makedirs(table_path)
-            
-    #         tables_metadata[table_name] = {
-    #             "num_columns": table.num_columns,
-    #             "key_index": table.key,
-    #             "page_directory": table.page_directory,
-    #             "indexes": {col: table.index.indices[col] for col in range(table.num_columns) if table.index.indices[col]}
-    #         }
-
-    #         # flush all pages to disk
-    #         for page_range_index in range(len(table.page_directory)):
-    #             page_range_path = os.path.join(table_path, f"PageRange_{page_range_index}")
-    #             if not os.path.exists(page_range_path):
-    #                 os.makedirs(page_range_path)
-                
-    #             for column_idx in range(table.num_columns):
-    #                 for page_idx in range(len(table.base_pages[column_idx])):
-
-    #                     # grab page from bufferpool
-    #                     page, frame_num = self.bufferpool.get_page(page_range_index, column_idx, page_idx)
-    #                     if page:
-    #                         file_path = os.path.join(page_range_path, f"Page_{column_idx}_{page_idx}.bin")
-    #                         with open(file_path, "wb") as file:
-    #                             file.write(page.data)
-    #                         self.bufferpool.mark_frame_used(frame_num)
-            
-    #         # write tables.json
-    #         tables_metadata_path = os.path.join(self.path, "tables.json")
-    #         with open(tables_metadata_path, "w") as file:
-    #             json.dump(tables_metadata, file, indent=4)
 
     """
     # Creates a new table
