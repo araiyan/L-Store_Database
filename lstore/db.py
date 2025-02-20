@@ -72,6 +72,9 @@ class Database():
             # serialize table metadata
             tables_metadata[table_name] = table.serialize()
 
+            # clear each table's bufferpool to free memory
+            table.bufferpool = None
+
         # save all tables' metadata to disk
         tables_metadata_path = os.path.join(self.path, "tables.json")
         with open(tables_metadata_path, "w", encoding="utf-8") as file:

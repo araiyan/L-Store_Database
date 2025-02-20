@@ -26,7 +26,6 @@ class TestDatabaseOpenClose(unittest.TestCase):
         table2.page_directory = {1: "PageData2"}
         table3.page_directory = {2: "PageData3"}
 
-
         table1.index.create_index(2)  # Index on column 2
         table2.index.create_index(3)  # Index on column 3
         table1.index.insert_to_index(2, 50, 1)
