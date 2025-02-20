@@ -391,7 +391,6 @@ class Query:
                 #print("Consolidated stack", consolidated_stack)
                 #print("page Locations", page_locations)
                 
-                # Not too sure if this is necessary anymore
                 if (len(page_locations) > 1):
 
                     tail_page_range = None
