@@ -266,8 +266,11 @@ class Table:
             "num_columns": self.num_columns,
             "key_index": self.key,
             "page_directory": self.page_directory,
+
+            # OOBTree is not JSON serializable, need to convert to dictionary
             "indexes": {
-                col: self.index.indices[col] for col in range(self.num_columns) if self.index.indices[col]
+                col: dict(self.index.indices[col]) if self.index.indices[col] else {} 
+                for col in range(self.num_columns)
             }
         }
     

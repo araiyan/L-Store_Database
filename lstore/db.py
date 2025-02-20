@@ -2,6 +2,7 @@ import os
 import json
 from lstore.table import Table
 from lstore.index import Index
+from BTrees.OOBTree import OOBTree
 
 class Database():
 
@@ -40,13 +41,20 @@ class Database():
 
                     # initialize indexes for table
                     table.index = Index(table)
+            
                     for column_idx, indexed_values in table_info["indexes"].items():
-                        table.index.create_index(int(column_idx))
+                        column_idx = int(column_idx)
 
-                        # loop through inner dictionary and load stored values into the created index
-                        for value, rids in indexed_values.items():
-                            for rid in rids:
-                                table.index.insert_to_index(int(column_idx), value, rid)
+                        # only restore if there were stored values
+                        if indexed_values:  
+                            restored_tree = OOBTree()
+                            for value, rids in indexed_values.items():
+
+                                # ensure column key and values are integers (JSON converts them to strings)
+                                restored_tree[int(value)] = {int(rid): True for rid in rids} 
+                            table.index.indices[column_idx] = restored_tree
+                        else:
+                            table.index.indices[column_idx] = None  # explicitly set to None for unindexed column
 
     def close(self):
         """Flushes dirty pages back to disk, saves table metadata and shuts down"""
