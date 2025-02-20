@@ -6,9 +6,9 @@ from BTrees.OOBTree import OOBTree
 
 class Database():
 
-    def __init__(self):
+    def __init__(self, path="ECS165"):
         self.tables:dict = {}
-        self.path = None
+        self.path = path
         
 
     def open(self, path):
@@ -80,9 +80,6 @@ class Database():
     def create_table(self, name, num_columns, key_index):
         if self.tables.get(name) is not None:
             raise NameError(f"Error creating Table! Following table already exists: {name}")
-        
-        if self.path is None:
-            raise ValueError("Database path is not set. Use open() before creating a table.")
 
         self.tables[name] = Table(name, num_columns, key_index, self.path)
         return self.tables[name]
