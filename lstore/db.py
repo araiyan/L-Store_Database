@@ -15,9 +15,6 @@ class Database():
         """Loads database from disk and restores tables, indexes, and pages"""
         self.path = path
 
-        # handle bufferpool initilization in table instead / each table manages its own bufferpool
-        # self.bufferpool = Bufferpool(path)
-
         # create new path if database path doesn't exist
         if not os.path.exists(path):
             os.makedirs(path)
@@ -34,6 +31,9 @@ class Database():
                     table = Table(table_name, table_info["num_columns"], table_info["key_index"], self.path)
                     self.tables[table_name] = table
 
+                    # retores table rid_index
+                    table.rid_index = table_info.get("rid_index", 0)
+
                     # restores page directory for table - converts keys back into correct data type (string --> integer)
                     table.page_directory = {}
                     for k, v in table_info["page_directory"].items():
@@ -41,20 +41,22 @@ class Database():
 
                     # initialize indexes for table
                     table.index = Index(table)
-            
-                    for column_idx, indexed_values in table_info["indexes"].items():
-                        column_idx = int(column_idx)
+                    
+                    # NO NEED TO MANUALLY DESERIALIZE FOR INDEXES
+                    # ---------------------------------------------
+                    # for column_idx, indexed_values in table_info["indexes"].items():
+                    #     column_idx = int(column_idx)
 
-                        # only restore if there were stored values
-                        if indexed_values:  
-                            restored_tree = OOBTree()
-                            for value, rids in indexed_values.items():
+                    #     # only restore if there were stored values
+                    #     if indexed_values:  
+                    #         restored_tree = OOBTree()
+                    #         for value, rids in indexed_values.items():
 
-                                # ensure column key and values are integers (JSON converts them to strings)
-                                restored_tree[int(value)] = {int(rid): True for rid in rids} 
-                            table.index.indices[column_idx] = restored_tree
-                        else:
-                            table.index.indices[column_idx] = None  # explicitly set to None for unindexed column
+                    #             # ensure column key and values are integers (JSON converts them to strings)
+                    #             restored_tree[int(value)] = {int(rid): True for rid in rids} 
+                    #         table.index.indices[column_idx] = restored_tree
+                    #     else:
+                    #         table.index.indices[column_idx] = None  # explicitly set to None for unindexed column
 
     def close(self):
         """Flushes dirty pages back to disk, saves table metadata and shuts down"""

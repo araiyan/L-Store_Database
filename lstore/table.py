@@ -266,12 +266,7 @@ class Table:
             "num_columns": self.num_columns,
             "key_index": self.key,
             "page_directory": self.page_directory,
-
-            # OOBTree is not JSON serializable, need to convert to dictionary
-            "indexes": {
-                col: dict(self.index.indices[col]) if self.index.indices[col] else {} 
-                for col in range(self.num_columns)
-            }
+            "rid_index": self.rid_index
         }
     
     def preload_pages(self):
