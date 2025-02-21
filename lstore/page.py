@@ -73,7 +73,7 @@ class PageRange:
         for i in range(self.total_num_columns):
             frame_num = self.bufferpool.get_page_frame_num(self.page_range_index, i, page_index, page_slot)
             self.bufferpool.mark_frame_used(frame_num)
-            
+
         return base_record_columns
         
 
@@ -120,9 +120,9 @@ class PageRange:
         page_slot = physical_rid % MAX_RECORD_PER_PAGE
         return page_index, page_slot
 
-
-    def has_capacity(self):
-        return len(self.base_pages[RID_COLUMN]) < MAX_PAGE_RANGE or self.base_pages[RID_COLUMN][-1].has_capacity()
+    def has_capacity(self, rid) -> bool:
+        '''returns true if there is capacity in the base pages for the given rid '''
+        return rid < (self.page_range_index * MAX_PAGE_RANGE * MAX_RECORD_PER_PAGE) 
 
     def assign_logical_rid(self) -> int:
         '''returns logical rid to be assigned to a column'''
