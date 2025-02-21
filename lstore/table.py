@@ -4,7 +4,7 @@ from time import time
 from lstore.config import *
 from lstore.bufferpool import Bufferpool
 import os
-
+import json
 import queue
 
 class Record:
@@ -40,7 +40,7 @@ class Table:
 
         # initialize bufferpool in table, not DB
         self.bufferpool = Bufferpool(self.table_path)
-        self.preload_pages()
+        #self.preload_pages()
         
         self.base_pages = {}
         self.tail_pages = {}
@@ -263,9 +263,27 @@ class Table:
     def serialize(self):
         """Returns table metadata as a JSON-compatible dictionary"""
         return {
+            "table_name": self.name,
             "num_columns": self.num_columns,
             "key_index": self.key,
             "page_directory": self.page_directory,
             "rid_index": self.rid_index
         }
 
+    def save_to_json(self, file_path):
+        """Saves the serialized table metadata to a JSON file"""
+        serialized_data = self.serialize()
+        with open(file_path, 'w') as json_file:
+            json.dump(serialized_data, json_file, indent=4)
+        print(f"Table metadata saved to {file_path}")
+
+    def load_from_json(self, file_path):
+        """Loads table metadata from a JSON file and restores the table state"""
+        with open(file_path, 'r') as json_file:
+            data = json.load(json_file)
+            self.name = data['table_name']
+            self.num_columns = data['num_columns']
+            self.key = data['key_index']
+            self.page_directory = data['page_directory']
+            self.rid_index = data['rid_index']
+        print(f"Table metadata loaded from {file_path}")
