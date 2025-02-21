@@ -1,5 +1,6 @@
 from lstore.config import *
 import struct
+import base64
 
 class Page:
     def __init__(self):
@@ -26,11 +27,18 @@ class Page:
         return struct.unpack_from("i", self.data, index * INTEGER_BYTE_SIZE)[0]
     
     def serialize(self):
-        pass
+        '''Returns page metadata as a JSON-compatible dictionary'''
+        return {
+            "num_records": self.num_records,
+
+            # converts bytearray into b64, which is then converted into a string (JSON compatible)
+            "data": base64.b64encode(self.data).decode('utf-8')
+         }
 
     def deserialize(self, json_data):
-        pass
-
+        '''Loads a page from serialized data'''
+        self.num_records = json_data["num_records"]
+        self.data = bytearray(base64.b64decode(json_data["data"]))
 
 class PageRange:
     '''
