@@ -141,7 +141,7 @@ class BufferPool:
         current_frame:Frame = self.frames[page_frame_num]
         return current_frame.get_page_capacity()
     
-    def get_page_slot(self, page_range_index, record_column, page_index, slot_index) -> Union[int, None]:
+    def read_page_slot(self, page_range_index, record_column, page_index, slot_index) -> Union[int, None]:
         '''Returns the value within a page if the page can be grabbed from disk,
         otherwise returns None'''
         page_disk_path = self.get_page_path(page_range_index, record_column, page_index)
