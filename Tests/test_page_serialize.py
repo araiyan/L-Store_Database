@@ -11,7 +11,11 @@ class TestPageSerializeDeserialize(unittest.TestCase):
     page = Page()
 
     page.num_records = 5
-    page.data[:5] = bytearray([1, 2, 3, 4, 5])
+    page.write_precise(0, 1)
+    page.write_precise(1, 2)
+    page.write_precise(2, 3)
+    page.write_precise(3, 4)
+    page.write_precise(4, 5)
 
     serialized_data = page.serialize()
 
@@ -25,7 +29,10 @@ class TestPageSerializeDeserialize(unittest.TestCase):
     new_page.deserialize(serialized_data)
 
     self.assertEqual(new_page.num_records, page.num_records)
-    self.assertEqual(new_page.data[:5], bytearray([1, 2, 3, 4, 5]))
+    
+    # loop over indicies (0 - 4) and check that values at those locations are correct
+    for i, value in enumerate([1, 2, 3, 4, 5]):
+      self.assertEqual(new_page.get(i), value)
 
 
 if __name__ == '__main__':
