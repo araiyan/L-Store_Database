@@ -164,7 +164,7 @@ class Table:
             
         # Grabs all records rid
         # TODO: If each indicy is a binary tree we need to iterate through the binary tree and grab all rids
-        all_rids = self.index.indices[self.key].grab_all()
+        all_rids = self.index.grab_all()
 
         # for each rid grab the most updated columns
         for _, base_rid in enumerate(all_rids):

@@ -39,55 +39,13 @@ class Index:
         else:
             rids = []
         return rids
-    
-    """
-    # basically the same as locate and locate range except it returns value in designated column 
-    # instead of rid when given primary/secondary key and its column number
-    """
-    def get(self, key_column_number, value_column_number, key):
-
-        if (key_column_number, value_column_number) in self.secondary_index:
-            values = list(self.secondary_index[key_column_number, value_column_number][key])
-            return values
-        
-        else:
-            values = []
-            for _, column_values in self.value_mapper.items():
-
-                # get key and values from value mapper
-                value_mapper_key = column_values[key_column_number]
-                value_mapper_value = column_values[value_column_number]
-                if value_mapper_key == key:
-                    values.append(value_mapper_value)
-            
-            return values
-        
-    def get_range(self, key_column_number, value_column_number, begin, end):
-        if (key_column_number, value_column_number) in self.secondary_index:
-            values = list(self.secondary_index[key_column_number, value_column_number].values(min=begin, max=end))
-            return [item for sublist in values for item in sublist]
-
-        else:
-            values = []
-            for primary_key, column_values in self.value_mapper.items():
-
-                # get key and values from value mapper
-                value_mapper_key = column_values[key_column_number]
-                value_mapper_value = column_values[value_column_number]
-
-                if begin <= value_mapper_key <= end:
-                    for item in value_mapper_value:
-                        values.append(item)
-            
-            return values
 
     """
     # Returns the RIDs of all records with values in column "column" between "begin" and "end" as a list
     # returns None if no rid found
     """
 
-    #only use for keys
-
+    #only use to find rid when given primary keys
     def locate_range(self, begin, end, column):
         return [rid for sublist in self.indices[column].values(min=begin, max=end) for rid in sublist.keys()] or None
 
@@ -262,6 +220,53 @@ class Index:
 
         return True
     
+    def grab_all(self):
+        all_rid = []
+        for _, rids in self.indices[self.key].items():
+            for rid in rids:
+                all_rid.append(rid)
+        return all_rid
+
+    """
+    # basically the same as locate and locate range except it returns value in designated column 
+    # instead of rid when given primary/secondary key and its column number
+    """
+    def get(self, key_column_number, value_column_number, key):
+
+        if (key_column_number, value_column_number) in self.secondary_index:
+            values = list(self.secondary_index[key_column_number, value_column_number][key])
+            return values
+        
+        else:
+            values = []
+            for _, column_values in self.value_mapper.items():
+
+                # get key and values from value mapper
+                value_mapper_key = column_values[key_column_number]
+                value_mapper_value = column_values[value_column_number]
+                if value_mapper_key == key:
+                    values.append(value_mapper_value)
+            
+            return values
+        
+    def get_range(self, key_column_number, value_column_number, begin, end):
+        if (key_column_number, value_column_number) in self.secondary_index:
+            values = list(self.secondary_index[key_column_number, value_column_number].values(min=begin, max=end))
+            return [item for sublist in values for item in sublist]
+
+        else:
+            values = []
+            for _, column_values in self.value_mapper.items():
+
+                # get key and values from value mapper
+                value_mapper_key = column_values[key_column_number]
+                value_mapper_value = column_values[value_column_number]
+
+                if begin <= value_mapper_key <= end:
+                    values.append(value_mapper_value)
+            
+            return values
+
     """
     referencing from Raiyan's bufferpool directory in disk
 

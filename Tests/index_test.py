@@ -22,8 +22,6 @@ class TestIndexMethods(unittest.TestCase):
         record5 = Record(4, table.key, [None, None, 20, None])
         record6 = Record(5, table.key, [91903, 104, 19, 99])
 
-           
-
         index = Index(table)
 
         # Should return None
@@ -34,15 +32,12 @@ class TestIndexMethods(unittest.TestCase):
         r2 = [0, record2.rid,0,0,record2.columns[0], record2.columns[1], record2.columns[2], record2.columns[3]]
         r3 = [0, record3.rid,0,0,record3.columns[0], record3.columns[1], record3.columns[2], record3.columns[3]]
 
-        index_age_to_grade = index.create_index(2,3)
         index.insert_in_all_indices(r1)
         index.insert_in_all_indices(r2)
         index.insert_in_all_indices(r3)
 
-        print(dict(index_age_to_grade))
-
-        # Should raise error for inserting same key more than once
-        # index.insert_in_all_indices(*r1)
+        all_rid = index.grab_all()
+        print(f"all_rid: {all_rid}")
 
         rid = index.locate(table.key, 101)
         print(f"Key 101 RID: {rid}")
@@ -58,13 +53,30 @@ class TestIndexMethods(unittest.TestCase):
 
         r4 = [0,record4.rid,0,0, record4.columns[0], record4.columns[1], record4.columns[2], record4.columns[3]]
         index.update_all_indices(103, r4)
-        print(dict(index_age_to_grade))
-
-        # Should raise error since key 200 doesn't exist
-        # index.update_all_indices(200, *r4)
 
         r5 = [0,record5.rid,0,0, record5.columns[0], record5.columns[1], record5.columns[2], record5.columns[3]]
         index.update_all_indices(103, r5)
+
+        print("get stuff from value mapper")
+        grades = index.get(table.key,3,101)
+        print(f"grades of students with primary key 101 : {grades}")
+
+        grades = index.get_range(table.key,3,101,103)
+        print(f"grades of students with primary key 101-103 : {grades}")
+
+        print("create and get stuff from secondary index")
+        index_primary_key_to_grade = index.create_index(table.key,3)
+        print(dict(index_primary_key_to_grade))
+
+        grades = index.get(table.key,3,101)
+        print(f"grades of students with primary key 101 : {grades}")
+
+        grades = index.get_range(table.key,3,101,103)
+        print(f"grades of students with primary key 101-103 : {grades}")
+
+
+        index_age_to_grade = index.create_index(2,3)
+        print(dict(index_age_to_grade))
 
         grades = index.get(2,3,20)
         print(f"grades of students age: 20 : {grades}")
@@ -89,30 +101,6 @@ class TestIndexMethods(unittest.TestCase):
 
         grades = index.get(2,3,20)
         print(f"grades of students age: 20 : {grades}")
-
-
-        # Test locate after update
-        # removed this test bc we're only indexing keys
-        # can test this if you uncomment creating all indices in __init__ in index
-        #rid = index.locate(2, 20)
-        #self.assertEqual(rid, [record1.rid, record5.rid])
-
-        #rid = index.locate(table.key, 103)
-        #print(f"Updated again key 103 RID: {rid}")
-
-        #r6 = [0,record6.rid,0,0,record6.columns[0], record6.columns[1], record6.columns[2], record6.columns[3]]
-        #index.insert_in_all_indices(*r6)
-
-        #rid = index.locate_range(102, 200, table.key)
-        #print(f"Key 102-200 RID: {rid}")
-
-
-
-        # Deleting columns with key 102
-        #index.delete_from_all_indices(r2[NUM_HIDDEN_COLUMNS + table.key])
-
-        # Should raise error since key 200 doesn't exist
-        # index.delete_from_all_indices(200)
 
 
 unittest.main()
