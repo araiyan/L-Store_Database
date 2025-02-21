@@ -17,7 +17,7 @@ class TestIndexMethods(unittest.TestCase):
         # Student id, Key, Age, Grade
         record1 = Record(0, table.key, [91900, 101, 20, 90])
         record2 = Record(1, table.key, [91901, 102, 21, 95])
-        record3 = Record(2, table.key, [91902, 103, 18, 86])
+        record3 = Record(2, table.key, [91902, 103, 18, 90])
         record4 = Record(3, table.key, [None, None, 19, 83])
         record5 = Record(4, table.key, [None, None, 20, None])
         record6 = Record(5, table.key, [91903, 104, 19, 99])
@@ -57,6 +57,13 @@ class TestIndexMethods(unittest.TestCase):
         r5 = [0,record5.rid,0,0, record5.columns[0], record5.columns[1], record5.columns[2], record5.columns[3]]
         index.update_all_indices(103, r5)
 
+        index.create_index(3, table.key)
+        rid_of_grades = index.locate(3,90)
+        print(f"rid of students with grade 90: {rid_of_grades}")
+
+        rid_of_grades = index.locate_range(50,92,3)
+        print(f"rid of students with grade 50-92: {rid_of_grades}")
+        
         print("get stuff from value mapper")
         grades = index.get(table.key,3,101)
         print(f"grades of students with primary key 101 : {grades}")
@@ -66,7 +73,7 @@ class TestIndexMethods(unittest.TestCase):
 
         print("create and get stuff from secondary index")
         index_primary_key_to_grade = index.create_index(table.key,3)
-        print(dict(index_primary_key_to_grade))
+        #print(dict(index_primary_key_to_grade))
 
         grades = index.get(table.key,3,101)
         print(f"grades of students with primary key 101 : {grades}")

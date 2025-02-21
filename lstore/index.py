@@ -31,23 +31,43 @@ class Index:
     # returns the location of all records with the given value on column "column" as a list
     # returns None if no rid found
     """
-
-    #only use this to find rid when given primary key
     def locate(self, column, value):
-        if value in self.indices[column]:
-            rids = list(self.indices[column][value].keys())
-        else:
-            rids = None
-        return rids
+
+        all_rids = []
+        if column != self.key:
+
+            primary_keys = self.get(column, self.key, value)
+
+            for key in primary_keys:
+                if key in self.indices[self.key]:
+                    if self.indices[self.key][key].keys():
+                        all_rids.append(list(self.indices[self.key][key].keys())[0])
+
+            if all_rids: return all_rids or None
+
+        if value in self.indices[self.key]:
+            return list(self.indices[self.key][value].keys()) or None
 
     """
     # Returns the RIDs of all records with values in column "column" between "begin" and "end" as a list
     # returns None if no rid found
     """
 
-    #only use to find rid when given primary keys
     def locate_range(self, begin, end, column):
-        return [rid for sublist in self.indices[column].values(min=begin, max=end) for rid in sublist.keys()] or None
+
+        all_rids = []
+        if column != self.key:
+
+            primary_keys = self.get_range(column, self.key, begin, end)
+
+            for key in primary_keys:
+                if key in self.indices[self.key]:
+                    if self.indices[self.key][key].keys():
+                        all_rids.append(list(self.indices[self.key][key].keys())[0])
+
+            if all_rids: return all_rids or None
+
+        return [rid for sublist in self.indices[self.key].values(min=begin, max=end) for rid in sublist.keys()] or None
 
     """
     # optional: Create index on specific columns 
@@ -57,7 +77,7 @@ class Index:
     def create_index(self, key_column_number, value_column_number):
         #deserialize value_mapper if lost
 
-        if key_column_number or value_column_number >= self.table.num_columns:
+        if (key_column_number or value_column_number) >= self.table.num_columns:
             return False
 
         if (key_column_number, value_column_number) not in self.secondary_index:
@@ -88,7 +108,7 @@ class Index:
     """
     def drop_index(self, key_column_number, value_column_number):
 
-        if key_column_number or value_column_number >= self.table.num_columns:
+        if (key_column_number or value_column_number) >= self.table.num_columns:
             return False
 
         # clears Btree and removes reference 
@@ -226,12 +246,23 @@ class Index:
 
         return True
     
+
+    """
+    # get all rid from primary index for merge
+    """
     def grab_all(self):
         all_rid = []
         for _, rids in self.indices[self.key].items():
             for rid in rids:
                 all_rid.append(rid)
         return all_rid
+    
+    
+    """
+    # Use the methods below for accessing secondary index
+    # Need to create one first using index.create_index(key_column, value_column)
+    # or the value will be searched through value mapper
+    """
 
     """
     # basically the same as locate and locate range except it returns value in designated column 
@@ -272,7 +303,7 @@ class Index:
                 if begin <= value_mapper_key <= end:
                     values.append(value_mapper_value)
             
-            return values
+            return values      
 
     """
     referencing from Raiyan's bufferpool directory in disk
