@@ -62,6 +62,20 @@ class PageRange:
         for (i, column) in enumerate(columns):
             self.bufferpool.write_page_slot(self.page_range_index, i, page_index, page_slot, column)
         return True
+    
+    def copy_base_record(self, page_index, page_slot) -> list:
+        base_record_columns = [None] * self.total_num_columns
+        # Read buffer pool frames
+        for i in range(self.total_num_columns):
+            base_record_columns = self.bufferpool.read_page_slot(self.page_range_index, i, page_index, page_slot)
+
+        # mark the frame used after reading
+        for i in range(self.total_num_columns):
+            frame_num = self.bufferpool.get_page_frame_num(self.page_range_index, i, page_index, page_slot)
+            self.bufferpool.mark_frame_used(frame_num)
+            
+        return base_record_columns
+        
 
     def write_tail_record(self, logical_rid, *columns) -> bool:
         '''Writes a set of columns to the tail pages returns true on success'''
