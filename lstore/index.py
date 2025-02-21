@@ -37,7 +37,7 @@ class Index:
         if value in self.indices[column]:
             rids = list(self.indices[column][value].keys())
         else:
-            rids = []
+            rids = None
         return rids
 
     """
@@ -57,12 +57,15 @@ class Index:
     def create_index(self, key_column_number, value_column_number):
         #deserialize value_mapper if lost
 
+        if key_column_number or value_column_number >= self.table.num_columns:
+            return False
+
         if (key_column_number, value_column_number) not in self.secondary_index:
 
             btree = OOBTree()
 
             # go through value mapper to create new index
-            for primary_key, column_values in self.value_mapper.items():
+            for _, column_values in self.value_mapper.items():
 
                 # get key and values from value mapper
                 key = column_values[key_column_number]
@@ -78,12 +81,15 @@ class Index:
             self.secondary_index[(key_column_number, value_column_number)] = btree
             return self.secondary_index[(key_column_number, value_column_number)]
         else:
-            raise IndexError(f"Index with key column: {key_column_number} and value column: {value_column_number} already exists.")
+            return False
 
     """
     # optional: Drop index of specific column
     """
     def drop_index(self, key_column_number, value_column_number):
+
+        if key_column_number or value_column_number >= self.table.num_columns:
+            return False
 
         # clears Btree and removes reference 
         if self.secondary_index[(key_column_number, value_column_number)] != None:
@@ -93,7 +99,7 @@ class Index:
 
         # if the index trying to drop doesn't exist in the dict of secondary indices
         else:
-            raise IndexError(f"Index with key column: {key_column_number} and value column: {value_column_number} does not exist.")
+            return False
 
     
     def delete_from_index(self, column_index, column_value):
@@ -101,19 +107,19 @@ class Index:
         index:OOBTree = self.indices[column_index]
 
         if (index is None):
-            raise IndexError("No indicy in the specified column")
+            return False
         
         if (index.get(column_value)):
             del index[column_value]
         else:
-            raise ValueError("Value not found in index")
+            return False
 
     def insert_to_index(self, column_index, column_value, rid):
         '''Used to insert the primary key for primary key indexing'''
         index:OOBTree = self.indices[column_index]
 
         if (index is None):
-            raise IndexError("No indicy in the specified column")
+            return False
         
         if (not index.get(column_value)):
             index[column_value] = {}
@@ -127,7 +133,7 @@ class Index:
         
         primary_key = columns[self.key + NUM_HIDDEN_COLUMNS]
         if self.indices[self.key].get(primary_key):
-            raise ValueError(f"Column with key: {columns[NUM_HIDDEN_COLUMNS + self.key]} already exists.")
+            return False
         
         # insert in primary index
         self.insert_to_index(self.key, primary_key, columns[RID_COLUMN])
@@ -156,7 +162,7 @@ class Index:
     def delete_from_all_indices(self, primary_key):
 
         if not self.indices[self.key].get(primary_key):
-            raise ValueError(f"Column with key: {primary_key} does not exist.")
+            return False
         
         #delete from primary index
         self.delete_from_index(self.key, primary_key)
@@ -186,7 +192,7 @@ class Index:
 
         #get rid from primary key
         if not self.indices[self.key].get(primary_key):
-            raise ValueError(f"Column with key: {primary_key} does not exist.")
+            return False
         
         #update new columns in value_mapper
         for i in range(0, self.num_columns):
@@ -250,6 +256,7 @@ class Index:
             return values
         
     def get_range(self, key_column_number, value_column_number, begin, end):
+
         if (key_column_number, value_column_number) in self.secondary_index:
             values = list(self.secondary_index[key_column_number, value_column_number].values(min=begin, max=end))
             return [item for sublist in values for item in sublist]
@@ -278,11 +285,11 @@ class Index:
         
     # use this when open db
     def generate_primary_index(self):
+        self.indices[self.key] = OOBTree()
         for i in range(len(self.table.base_pages)):
             for j in range(MAX_RECORD_PER_PAGE):
                 primary_key = self.table.base_pages[NUM_HIDDEN_COLUMNS + self.table.key][i].get(j)
                 rid = self.table.base_pages[RID_COLUMN][i].get(j)
-                self.indices[self.key] = OOBTree()
                 self.insert_to_index(self.key, primary_key, rid)
     
     # use this when open db
@@ -291,13 +298,14 @@ class Index:
             with open(self.path_to_value_mapper, 'rb') as file:
                 self.value_mapper = pickle.load(file)
         else:
-            raise FileNotFoundError("File at {path} cannot be deserialized because it does not exist.")
+            return False
 
     #use this when close db
     def serialize_value_mapper(self):
         index_directory = os.path.dirname(self.path_to_value_mapper)
         if not os.path.exists(index_directory):
-            os.makedirs(index_directory)
+            return False
+            #os.makedirs(index_directory)
 
         with open(self.path_to_value_mapper, 'wb') as file:
             pickle.dump(self.value_mapper, file)
