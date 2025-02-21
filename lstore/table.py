@@ -2,6 +2,8 @@ from lstore.index import Index
 from lstore.page import Page
 from time import time
 from lstore.config import *
+from lstore.bufferpool import BufferPool
+import os
 
 import queue
 
@@ -23,16 +25,21 @@ class Table:
     :param num_columns: int     #Number of Columns: all columns are integer
     :param key: int             #Index of table key in columns
     """
-    def __init__(self, name, num_columns, key):
+    def __init__(self, name, num_columns, key, db_path):
         if (key < 0 or key >= num_columns):
             raise ValueError("Error Creating Table! Primary Key must be within the columns of the table")
 
         self.name = name
         self.key = key
+        self.db_path = db_path
+        self.table_path = os.path.join(db_path, name)
         self.num_columns = num_columns
         self.total_num_columns = num_columns + NUM_HIDDEN_COLUMNS
         self.page_directory = {}
         self.index = Index(self)
+
+        # initialize bufferpool in table, not DB
+        self.bufferpool = BufferPool(self.table_path)
         
         self.base_pages = {}
         self.tail_pages = {}
@@ -53,6 +60,13 @@ class Table:
         
         record.rid = self.rid_index
         self.rid_index += 1
+
+    def get_base_record_location(self, rid):
+        '''Returns the location of a record within base pages given a rid'''
+        page_range_index = rid // (MAX_PAGE_RANGE * MAX_RECORD_PER_PAGE)
+        page_index = rid % (MAX_PAGE_RANGE * MAX_RECORD_PER_PAGE) // MAX_RECORD_PER_PAGE
+        page_slot = rid % MAX_RECORD_PER_PAGE
+        return (page_range_index, page_index, page_slot)
 
     def insert_record(self, record: Record):
         if (self.index.locate(self.key, record.columns[NUM_HIDDEN_COLUMNS + self.key])):
@@ -252,5 +266,12 @@ class Table:
         for i in range(self.total_num_columns):
             self.tail_pages_prev_merge[i] = len(self.tail_pages[i]) - 1
         
+    def serialize(self):
+        """Returns table metadata as a JSON-compatible dictionary"""
+        return {
+            "num_columns": self.num_columns,
+            "key_index": self.key,
+            "page_directory": self.page_directory,
+            "rid_index": self.rid_index
+        }
 
- 
