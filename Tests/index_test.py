@@ -1,9 +1,12 @@
 import sys
 sys.path.append("..")
+from random import choice, randint, sample, seed
 
 from lstore.index import Index
 from lstore.table import Table,Record
 from lstore.config import *
+from lstore.db import Database
+from lstore.query import Query
 
 import unittest
 
@@ -11,21 +14,51 @@ class TestIndexMethods(unittest.TestCase):
     
 
     def test_index(self):
+
+        
+        db = Database()
+        db.open('./ECS165')
+
+        grades_table = db.create_table('Grades', 5, 0)
+
+
+        query = Query(grades_table)
+
+
+        records = {}
+
+        number_of_records = 1000
+        number_of_aggregates = 100
+        number_of_updates = 1
+
+        seed(3562901)
+        all_keys = []
+        for i in range(0, number_of_records):
+            key = 92106429 + i
+            records[key] = [key, randint(0, 20), randint(0, 20), randint(0, 20), randint(0, 20)]
+            all_keys.append(key)
+            query.insert(*records[key])
+        keys = sorted(list(records.keys()))
+        print("Insert finished")
+
+        grades_table.index.serialize_value_mapper()
+        grades_table.index.deserialize_value_mapper()
+        for item in all_keys:
+            print(grades_table.index.locate(grades_table.key, item))
+            print(grades_table.index.value_mapper[item])
             
-        table = Table(name="Students", num_columns=4, key=1)
-
+        """
         # Student id, Key, Age, Grade
-        record1 = Record(0, table.key, [91900, 101, 20, 90])
-        record2 = Record(1, table.key, [91901, 102, 21, 95])
-        record3 = Record(2, table.key, [91902, 103, 18, 90])
-        record4 = Record(3, table.key, [None, None, 19, 83])
-        record5 = Record(4, table.key, [None, None, 20, None])
-        record6 = Record(5, table.key, [91903, 104, 19, 99])
+        record1 = Record(0, grades_table.key, [91900, 101, 20, 90])
+        record2 = Record(1, grades_table.key, [91901, 102, 21, 95])
+        record3 = Record(2, grades_table.key, [91902, 103, 18, 90])
+        record4 = Record(3, grades_table.key, [None, None, 19, 83])
+        record5 = Record(4, grades_table.key, [None, None, 20, None])
+        record6 = Record(5, grades_table.key, [91903, 104, 19, 99])
 
-        index = Index(table)
 
         # Should return None
-        key = index.locate(table.key, 101)
+        key = index.locate(grades_table.key, 101)
         print(f"Key 101 RID: {key}")
 
         r1 = [0, record1.rid,0,0,record1.columns[0], record1.columns[1], record1.columns[2], record1.columns[3]]
@@ -39,16 +72,16 @@ class TestIndexMethods(unittest.TestCase):
         all_rid = index.grab_all()
         print(f"all_rid: {all_rid}")
 
-        rid = index.locate(table.key, 101)
+        rid = index.locate(grades_table.key, 101)
         print(f"Key 101 RID: {rid}")
         self.assertEqual(rid[0], record1.rid)
 
-        rid = index.locate_range(102, 103, table.key)
+        rid = index.locate_range(102, 103, grades_table.key)
         print(f"Key 102-103 RID: {rid}")
         self.assertEqual(rid, [record2.rid, record3.rid])
 
         # Should return None since key 200 doesn't exist
-        rid = index.locate(table.key, 200)
+        rid = index.locate(grades_table.key, 200)
         print(f"Key 200 RID: {rid}")
 
         r4 = [0,record4.rid,0,0, record4.columns[0], record4.columns[1], record4.columns[2], record4.columns[3]]
@@ -57,7 +90,7 @@ class TestIndexMethods(unittest.TestCase):
         r5 = [0,record5.rid,0,0, record5.columns[0], record5.columns[1], record5.columns[2], record5.columns[3]]
         index.update_all_indices(103, r5)
 
-        index.create_index(3, table.key)
+        index.create_index(3, grades_table.key)
         rid_of_grades = index.locate(3,90)
         print(f"rid of students with grade 90: {rid_of_grades}")
 
@@ -65,20 +98,20 @@ class TestIndexMethods(unittest.TestCase):
         print(f"rid of students with grade 50-92: {rid_of_grades}")
         
         print("get stuff from value mapper")
-        grades = index.get(table.key,3,101)
+        grades = index.get(grades_table.key,3,101)
         print(f"grades of students with primary key 101 : {grades}")
 
-        grades = index.get_range(table.key,3,101,103)
+        grades = index.get_range(grades_table.key,3,101,103)
         print(f"grades of students with primary key 101-103 : {grades}")
 
         print("create and get stuff from secondary index")
-        index_primary_key_to_grade = index.create_index(table.key,3)
+        index_primary_key_to_grade = index.create_index(grades_table.key,3)
         #print(dict(index_primary_key_to_grade))
 
-        grades = index.get(table.key,3,101)
+        grades = index.get(grades_table.key,3,101)
         print(f"grades of students with primary key 101 : {grades}")
 
-        grades = index.get_range(table.key,3,101,103)
+        grades = index.get_range(grades_table.key,3,101,103)
         print(f"grades of students with primary key 101-103 : {grades}")
 
 
@@ -97,17 +130,18 @@ class TestIndexMethods(unittest.TestCase):
 
         print(f"secondary index age to grade: {dict(index_age_to_grade)}")
 
-        column = index.delete_from_all_indices(record2.columns[table.key])
+        column = index.delete_from_all_indices(record2.columns[grades_table.key])
         print(f"deleted column: {column} from all index")
         print(f"secondary index age to grade: {dict(index_age_to_grade)}")
 
-        column = index.delete_from_all_indices(record3.columns[table.key])
+        column = index.delete_from_all_indices(record3.columns[grades_table.key])
         print(f"deleted column: {column} from all index")
         print(f"secondary index age to grade: {dict(index_age_to_grade)}")
         print(dict(index.value_mapper))
 
         grades = index.get(2,3,20)
         print(f"grades of students age: 20 : {grades}")
+        """
 
 
 unittest.main()

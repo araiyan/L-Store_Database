@@ -9,23 +9,34 @@ import os
 class Index:
 
     def __init__(self, table):
-        # One index for each table. All our empty initially.
-        self.indices = [None] * table.num_columns
-        # maps primary key to its most updated column values
 
-        """
-        self.value_mapper[primary_key] = [column1_value, column2_value...]
-        """
-        self.value_mapper = OOBTree()
-        self.secondary_index = {}
+        self.indices = [None] * table.num_columns
 
         self.num_columns = table.num_columns
         self.key = table.key
-
-        self.path_to_value_mapper = os.path.join("DB Directory", table.name, "Index", "Value_Mapper.pkl")
-
-        self.indices[self.key] = OOBTree()
+        #self.bufferpool = table.bufferpool
+        #self.page_ranges = table.page_ranges
         self.table = table
+        self.secondary_index = {}
+
+        self.index_directory = os.path.join(table.table_path, "Index")
+        self.path_to_value_mapper = os.path.join(self.index_directory, "Value_Mapper.pkl")
+
+        if not os.path.exists(self.index_directory):
+            os.makedirs(self.index_directory)
+
+        #primary index and value mapper are recreated upon reopening db
+        self.__generate_primary_index()
+
+        if os.path.exists(self.path_to_value_mapper) and os.path.getsize(self.path_to_value_mapper) != 0:
+            self.deserialize_value_mapper()
+        else: 
+            """
+            #maps primary key to its most updated column values
+            #self.value_mapper[primary_key] = [column1_value, column2_value...]
+            """
+            self.value_mapper = OOBTree()
+
 
     """
     # returns the location of all records with the given value on column "column" as a list
@@ -33,20 +44,11 @@ class Index:
     """
     def locate(self, column, value):
 
-        all_rids = []
         if column != self.key:
-
             primary_keys = self.get(column, self.key, value)
-
-            for key in primary_keys:
-                if key in self.indices[self.key]:
-                    if self.indices[self.key][key].keys():
-                        all_rids.append(list(self.indices[self.key][key].keys())[0])
-
-            if all_rids: return all_rids or None
-
-        if value in self.indices[self.key]:
-            return list(self.indices[self.key][value].keys()) or None
+            return self.__get_rid_from_subset_of_primary_key(primary_keys)
+            
+        return list(self.indices[column].get(value, [])) or None
 
     """
     # Returns the RIDs of all records with values in column "column" between "begin" and "end" as a list
@@ -55,19 +57,23 @@ class Index:
 
     def locate_range(self, begin, end, column):
 
-        all_rids = []
         if column != self.key:
 
             primary_keys = self.get_range(column, self.key, begin, end)
+            return self.__get_rid_from_subset_of_primary_key(primary_keys)
 
-            for key in primary_keys:
+        return [rid for sublist in self.indices[self.key].values(min=begin, max=end) for rid in sublist.keys()] or None
+    
+
+    def __get_rid_from_subset_of_primary_key(self, primary_keys):
+        all_rids = []
+        for key in primary_keys:
                 if key in self.indices[self.key]:
                     if self.indices[self.key][key].keys():
                         all_rids.append(list(self.indices[self.key][key].keys())[0])
 
-            if all_rids: return all_rids or None
+        return all_rids if all_rids else None
 
-        return [rid for sublist in self.indices[self.key].values(min=begin, max=end) for rid in sublist.keys()] or None
 
     """
     # optional: Create index on specific columns 
@@ -260,7 +266,7 @@ class Index:
     
     """
     # Use the methods below for accessing secondary index
-    # Need to create one first using index.create_index(key_column, value_column)
+    # decide if you want to create one first using index.create_index(key_column, value_column)
     # or the value will be searched through value mapper
     """
 
@@ -271,39 +277,37 @@ class Index:
     def get(self, key_column_number, value_column_number, key):
 
         if (key_column_number, value_column_number) in self.secondary_index:
+            #search secondary index
             values = list(self.secondary_index[key_column_number, value_column_number][key])
-            return values
+            return values if values else None
         
         else:
-            values = []
-            for _, column_values in self.value_mapper.items():
+            self.__search_value_mapper(key_column_number, value_column_number, key, key)
 
-                # get key and values from value mapper
-                value_mapper_key = column_values[key_column_number]
-                value_mapper_value = column_values[value_column_number]
-                if value_mapper_key == key:
-                    values.append(value_mapper_value)
-            
-            return values
-        
+
     def get_range(self, key_column_number, value_column_number, begin, end):
 
         if (key_column_number, value_column_number) in self.secondary_index:
+            #search secondary index
             values = list(self.secondary_index[key_column_number, value_column_number].values(min=begin, max=end))
-            return [item for sublist in values for item in sublist]
+            return [item for sublist in values for item in sublist] or None
 
         else:
-            values = []
-            for _, column_values in self.value_mapper.items():
+            self.__search_value_mapper(key_column_number, value_column_number, begin, end)
+
+
+    def __search_value_mapper(self, key_column_number, value_column_number, begin, end):
+        values = []
+        for _, column_values in self.value_mapper.items():
 
                 # get key and values from value mapper
-                value_mapper_key = column_values[key_column_number]
-                value_mapper_value = column_values[value_column_number]
+            value_mapper_key = column_values[key_column_number]
+            value_mapper_value = column_values[value_column_number]
 
-                if begin <= value_mapper_key <= end:
-                    values.append(value_mapper_value)
+            if begin <= value_mapper_key <= end:
+                values.append(value_mapper_value)
             
-            return values      
+        return values if values else None
 
     """
     referencing from Raiyan's bufferpool directory in disk
@@ -315,28 +319,28 @@ class Index:
     """
         
     # use this when open db
-    def generate_primary_index(self):
+    def __generate_primary_index(self):
+        #initialize a BTree
         self.indices[self.key] = OOBTree()
-        for i in range(len(self.table.base_pages)):
-            for j in range(MAX_RECORD_PER_PAGE):
-                primary_key = self.table.base_pages[NUM_HIDDEN_COLUMNS + self.table.key][i].get(j)
-                rid = self.table.base_pages[RID_COLUMN][i].get(j)
-                self.insert_to_index(self.key, primary_key, rid)
+
+        #get base rid for every record with no duplicates
+        all_base_rids = set(self.table.page_directory.values())
+
+        #read through bufferpool to get primary index
+        for rid in all_base_rids:
+            page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
+            primary_key = self.table.bufferpool.read_page_slot(page_range_index, self.key, page_index, page_slot)
+
+            #insert {primary_index: {rid: True}} into primary index BTree
+            self.insert_to_index(self.key, primary_key, rid)
     
     # use this when open db
     def deserialize_value_mapper(self):
-        if os.path.exists(self.path_to_value_mapper):
-            with open(self.path_to_value_mapper, 'rb') as file:
-                self.value_mapper = pickle.load(file)
-        else:
-            return False
+        with open(self.path_to_value_mapper, 'rb') as file:
+            self.value_mapper = pickle.load(file)
+
 
     #use this when close db
     def serialize_value_mapper(self):
-        index_directory = os.path.dirname(self.path_to_value_mapper)
-        if not os.path.exists(index_directory):
-            return False
-            #os.makedirs(index_directory)
-
         with open(self.path_to_value_mapper, 'wb') as file:
             pickle.dump(self.value_mapper, file)
