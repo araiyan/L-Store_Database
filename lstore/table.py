@@ -5,7 +5,7 @@ from lstore.config import *
 from lstore.bufferpool import BufferPool
 import json
 import os
-import threading
+import json
 import queue
 
 from typing import List
@@ -51,9 +51,14 @@ class Table:
         self.index = Index(self)
 
         # initialize bufferpool in table, not DB
-        self.bufferpool = BufferPool(self.table_path)
-        self.page_ranges:List[PageRange] = []
-    
+        self.bufferpool = Bufferpool(self.table_path)
+        #self.preload_pages()
+        
+        self.base_pages = {}
+        self.tail_pages = {}
+        self.tail_pages_prev_merge = [0] * self.num_columns
+        '''Keeps track of the number of tail pages that have been merged'''
+
         self.diallocation_rid_queue = queue.Queue()
 
         # The table should handle assigning RIDs
