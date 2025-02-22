@@ -35,7 +35,7 @@ class Page:
 
             # converts bytearray into b64, which is then converted into a string (JSON compatible)
             "data": base64.b64encode(compressed_data).decode('utf-8')
-         }
+        }
 
     def deserialize(self, json_data):
         '''Loads a page from serialized data'''
