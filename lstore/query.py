@@ -48,6 +48,9 @@ class Query:
     # Returns False if insert fails for whatever reason
     """
     def insert(self, *columns):
+        if (self.table.index.locate(self.table.key, columns[NUM_HIDDEN_COLUMNS + self.table.key])):
+            return False
+        
         # check for invalid number of columns
         if len(columns) != self.table.num_columns:
             return False
@@ -60,10 +63,13 @@ class Query:
         hidden_columns[RID_COLUMN] = record.rid
         hidden_columns[TIMESTAMP_COLUMN] = int(time())
         hidden_columns[SCHEMA_ENCODING_COLUMN] = 0
+        hidden_columns[BASE_PAGE_ID_COLUMN] = record.rid
         record.columns = hidden_columns + list(columns)
         
         self.table.insert_record(record)
         self.table.index.insert_to_index(self.table.key, columns[self.table.key], record.rid)
+
+        return True
 
     
     """
