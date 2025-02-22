@@ -1,11 +1,13 @@
 from lstore.table import Table, Record
 from lstore.index import Index
 from lstore.page import Page
+from lstore.page_range import PageRange
 from lstore.config import *
-from lstore.bufferpool import Bufferpool, Frame
+from lstore.bufferpool import BufferPool, Frame
+
 
 from time import time
-
+from math import floor
 
 class Query:
     """
@@ -14,9 +16,9 @@ class Query:
     Queries that succeed should return the result or True
     Any query that crashes (due to exceptions) should return False
     """
-    def __init__(self, table, bufferpool):
+    def __init__(self, table):
         self.table:Table = table
-        self.bufferpool:Bufferpool = bufferpool
+        self.bufferpool:BufferPool = self.table.bufferpool
         pass
 
     
@@ -26,6 +28,8 @@ class Query:
     # Returns True upon succesful deletion
     # Return False if record doesn't exist or is locked due to 2PL
     """
+
+    # Delete was simplified to just locate rid and put it on the queue, then deleting indices. Actual process will occur in merge function
     def delete(self, primary_key):
 
         # Locate the RID associated with the primary key
@@ -33,20 +37,8 @@ class Query:
         if(base_rid is None):
             return False  # Record does not exist
 
-        base_page_index, base_page_slot = self.table.page_directory[base_rid[0]][0]
-        page_range_index = None # Somehow get a page range index where the base record is stored; currently just using None as placeholder
-
-        # Use the Bufferpool API to load the appropriate frame.
-        tup = self.__getPageTuple(page_range_index, RID_COLUMN, base_page_index)
-        
-        frame, frame_num = tup
-
-        frame.write_precise_with_lock(base_page_slot, RECORD_DELETION_FLAG)
         self.table.diallocation_rid_queue.put(base_rid[0])
         self.table.index.delete_from_index(self.table.key, primary_key, base_rid[0])
-
-        # Mark frame as used, no longer needed
-        self.bufferpool.mark_frame_used(frame_num)              # Decreases pin count on frame
 
         # Deletion successful
         return True
@@ -59,6 +51,11 @@ class Query:
     # Returns False if insert fails for whatever reason
     """
     def insert(self, *columns):
+
+        if (self.table.index.locate(self.table.key, columns[NUM_HIDDEN_COLUMNS + self.table.key])):
+            return False
+
+
         # check for invalid number of columns
         if len(columns) != self.table.num_columns:
             return False
@@ -71,9 +68,11 @@ class Query:
         hidden_columns[RID_COLUMN] = record.rid
         hidden_columns[TIMESTAMP_COLUMN] = int(time())
         hidden_columns[SCHEMA_ENCODING_COLUMN] = 0
+        hidden_columns[BASE_PAGE_ID_COLUMN] = record.rid
         record.columns = hidden_columns + list(columns)
         
-        self.table.insert_record(record)
+        page_range_index, page_index, page_slot = self.table.get_base_record_location(record.rid)
+        self.table.page_ranges[page_range_index].write_base_record(page_index, page_slot, *record.columns)
         self.table.index.insert_to_index(self.table.key, columns[self.table.key], record.rid)
 
         return True
@@ -115,7 +114,11 @@ class Query:
 
         # iterate through all desired RIDs
         for rid in rid_list:
+
             record_columns = [None] * self.table.num_columns
+            page_range_index, base_page_index, base_page_slot = self.table.get_base_record_location(rid)
+
+
             projected_columns_schema = 0
             for i in range(len(projected_columns_index)):
                 if projected_columns_index[i] == 1:
@@ -123,119 +126,62 @@ class Query:
 
             # Since primary key is never updated we can grab the primary key column directly from the base page
             if (projected_columns_schema >> self.table.key) & 1 == 1:
-                base_page_number, base_page_index = self.table.page_directory[rid][0]
-                page_range_index = None # Currently not a way to get it, temporarily replacing w/ None
 
-                page_tuple = self.__getPageTuple(page_range_index, NUM_HIDDEN_COLUMNS + self.table.key, base_page_index)               # Increment primary key pin
-
-                frame, frame_num = page_tuple
-                record_columns[self.table.key] = frame.page.get(base_page_number)
+                base_page_index, base_page_slot = self.table.page_ranges[page_range_index].get_column_location(rid, NUM_HIDDEN_COLUMNS + self.table.key)
+                record_columns[self.table.key] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + self.table.key, base_page_index, base_page_slot)
                 projected_columns_schema &= ~(1 << self.table.key)
-                self.bufferpool.mark_frame_used(frame_num)                                                                              # Decrement primary key pin
             
-            consolidated_stack, indirection_rid = self.__grabConsolidatedStack(rid)
             # store the (base) page# and index# that the RID/row is located
-
+            consolidated_stack, indirection_rid = self.__grabConsolidatedStack(rid)
             consolidated_rid, consolidated_timestamp = consolidated_stack.pop()
 
             # print(f"RID: {rid}, Base RID: {consolidated_rid}, Timestamp: {consolidated_timestamp}, Indirection RID: {indirection_rid}")
 
             # traverse through the tail pages based on the relative version
             current_version = 0
-            page_locations = self.table.page_directory[indirection_rid]
+            page_locations = self.table.page_ranges[page_range_index].logical_directory.get(indirection_rid, None)
             
             while (indirection_rid != rid and current_version > relative_version):
                 current_version -= 1
-                
-
-
-                # I think page_locations[0] represents the page index and page_locations[1] represents the slot? 
-
-                """
-                This part is wrong since we shouldn't be geting the page index using page_locations[0] as we're looking for the page range instead.
-                """
-
-                indir_page_range = None
-                tail_page_range = None
-
-                indir_tuple = self.__getPageTuple(indir_page_range, INDIRECTION_COLUMN, page_locations[1])            # Increment indirection pin 
-                tail_tuple  = self.__getPageTuple(tail_page_range, TIMESTAMP_COLUMN, page_locations[1])               # Increment tail pin
-                
-                # From the tuples returned by the bufferpool, we extract the pages where the indirection and tail are stored
-                indir_frame, indir_frame_num = indir_tuple
-                tail_frame, tail_frame_num = tail_tuple
-                
-                indirection_rid = indir_frame.page.get(page_locations[1])
-                tail_timestamp = tail_frame.page.get(page_locations[1])
+                indirection_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_locations[1])
+                tail_timestamp = self.table.bufferpool.read_page_slot(page_range_index, TIMESTAMP_COLUMN, page_locations[1])
 
                 # Skip over newer consolidated pages
-                if (consolidated_timestamp > tail_timestamp):
+                if consolidated_timestamp > tail_timestamp:
                     consolidated_rid, consolidated_timestamp = consolidated_stack.pop()
-
-                page_locations = self.table.page_directory[indirection_rid]
-
-                self.bufferpool.mark_frame_used(indir_frame_num)            # Decrement indirection pin
-                self.bufferpool.mark_frame_used(tail_frame_num)             # Decrement tail pin
+                
+                page_locations = self.table.page_ranges[page_range_index].logical_directory.get(indirection_rid, None)
 
             #print("Consolidated stack", consolidated_stack)
             #print("page Locations", page_locations)
             
             if (len(page_locations) > 1):
                 while (projected_columns_schema > 0 and indirection_rid != rid and tail_timestamp >= consolidated_timestamp):
-                    tail_page_range = None
-                    schema_page_range = None
-
-                    tail_tuple = self.__getPageTuple(tail_page_range, TIMESTAMP_COLUMN, page_locations[1])              # Increment tail pin
-                    schema_tuple = self.__getPageTuple(schema_page_range, SCHEMA_ENCODING_COLUMN, page_locations[1])      # Increment schema pin
-                    
-                    tail_frame, tail_frame_num = tail_tuple
-                    schema_frame, schema_frame_num = schema_tuple
-
-                    tail_timestamp = tail_frame.page.get(page_locations[1])
-                    schema_column = schema_frame.page.get(page_locations[1])
+                    tail_timestamp = self.table.bufferpool.read_page_slot(page_range_index, TIMESTAMP_COLUMN, page_locations[1])
+                    schema_column = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, page_locations[1])
 
                     for i in range(self.table.num_columns):
                         if (((projected_columns_schema >> i) & 1 == 1) and ((schema_column >> i) & 1 == 1)):
-                            col_page_range = None
-
-                            col_tuple = self.__getPageTuple(col_page_range, NUM_HIDDEN_COLUMNS + i, page_locations[1])      # Increment record column pin
                             
-                            col_frame, col_frame_num = col_tuple
-                            record_columns[i] = col_frame.page.get(page_locations[1])
+                            record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, page_locations[1])
                             projected_columns_schema &= ~(1 << i)
-                            self.bufferpool.mark_frame_used(col_frame_num)              # Decrement record column pin
 
                         if projected_columns_schema == 0:
                             break
 
-                    indir_page_range = None
-                    indir_tuple = self.__getPageTuple(indir_page_range, INDIRECTION_COLUMN, page_locations[1])               # Incrememnt indir pin
-                    indir_frame, indir_frame_num = indir_tuple
-                    indirection_rid = indir_frame.page.get(page_locations[1])
+                    indirection_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_locations[1])
                     page_locations = self.table.page_directory[indirection_rid]
-
-                    self.bufferpool.mark_frame_used(indir_frame_num)                        # Decrement indir pin
-                    self.bufferpool.mark_frame_used(tail_frame_num)                         # Decrement tail pin
-                    self.bufferpool.mark_frame_used(schema_frame_num)                       # Decrement schema pin
 
             # if we were unsuccessful in finding an older version - this implies that indirection_rid == rid and we can
             # thus directly retrieve from the base/consolidated page
 
-            consolidated_page_location = self.table.page_directory.get(consolidated_rid, None)
-            consolidated_page_index, consolidated_page_slot = consolidated_page_location[0]
-            consolidated_page_range = None  # Temporarily NONE
-
+            consolidated_page_index, consolidated_page_slot = self.table.page_ranges[page_range_index].get_column_location(consolidated_rid, NUM_HIDDEN_COLUMNS + self.table.key)
 
             for i in range(self.table.num_columns):
                 if (projected_columns_schema >> i) & 1 == 1:
 
-                    page_range = None
-                    page_tuple = self.__getPageTuple(page_range, NUM_HIDDEN_COLUMNS + i, consolidated_page_index)      # Increment record column pin
-                    
-                    frame, frame_num = page_tuple
-                    record_columns[i] = frame.page.get(consolidated_page_slot)
+                    record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, consolidated_page_index, consolidated_page_slot)
                     projected_columns_schema &= ~(1 << i)
-                    self.bufferpool.mark_frame_used(frame_num)                          # Decrement record column pin
                 
             record_objs.append(Record(rid, record_columns[self.table.key], record_columns))
             
@@ -248,20 +194,17 @@ class Query:
     """
     def update(self, primary_key, *columns):
 
-        # We want to see if the record exists with the specified key; no point in continuing further without checking
         rid_location = self.table.index.locate(self.table.key, primary_key)
         if(rid_location is None):
             print("Update Error: Record does not exist")
             return False
         
-        # The tail should have the same number of columns as the other pages so we should be multiplying by the total_num_columns value
-        # Multiplying by [None] atm since the columns don't have an assigned size
         new_columns = [None] * self.table.total_num_columns
 
         schema_encoding = 0
         projected_columns = []
 
-        # Insert values into the new column
+
         for i, value in enumerate(columns):
 
             # If we're modifying the primary_key then this update should be stopped since we can't change the primary_key column
@@ -276,33 +219,18 @@ class Query:
             
             new_columns[NUM_HIDDEN_COLUMNS + i] = value
 
-        # We want to set indirection for temp tail record to be the previous tail_rid --> go to base/cons to get latest
-        cons_rid = self.__getLatestConRid(rid_location[0])
-        cons_page_index, cons_page_slot = self.table.page_directory[cons_rid][0]
-        
-        tail_tuple = self.__getPageTuple(None, INDIRECTION_COLUMN, cons_page_index)
-        tail_frame, frame_num = tail_tuple
-        prev_tail_rid = tail_frame.page.get(cons_page_slot)
-        self.bufferpool.mark_frame_used(frame_num)
+        page_range_index, page_index, page_slot = self.table.get_base_record_location(rid_location[0])
+        _, prev_tail_rid = self.__grabConsolidatedStack(rid_location[0])
 
         new_columns[INDIRECTION_COLUMN] = prev_tail_rid
         new_columns[SCHEMA_ENCODING_COLUMN] = schema_encoding
         new_columns[TIMESTAMP_COLUMN] = int(time())
 
-        # Updates the indirection column on the base/cons page for new tail page
-        cons_page_index, cons_page_slot = self.table.page_directory[cons_rid][0]
-        indir_tuple = self.__getPageTuple(None, INDIRECTION_COLUMN, cons_page_index)
-        frame, frame_num = indir_tuple
-
-        # Create new record and initialize it into the pd
         new_record = Record(rid = -1, key = primary_key, columns = new_columns)
         self.table.assign_rid_to_record(new_record)
-        self.table.page_directory[new_record.rid] = [None] * self.table.total_num_columns
-        new_columns[RID_COLUMN] =  new_record.rid
-        self.__writeTailRecord(new_record)
-        
-        frame.write_precise_with_lock(cons_page_slot, new_record.rid)
-        self.bufferpool.mark_frame_used(frame_num)
+        self.table.page_ranges[page_range_index].write_tail_record(new_record.rid, *new_columns)
+
+        self.table.bufferpool.write_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot, new_record.rid)
 
         # Update successful
         # print("Update Successful\n")
@@ -338,95 +266,57 @@ class Query:
             return False
 
         sum_total = 0
+
         for rid in records_list:
             aggregate_column_value = None
-            consolidated_stack, indirection_rid = self.__grabConsolidatedStack(rid)
-            # store the (base) page# and index# that the RID/row is located
+            page_range_index = floor(rid / (MAX_PAGE_RANGE * MAX_RECORD_PER_PAGE))
 
+            # store the (base) page# and index# that the RID/row is located
+            consolidated_stack, indirection_rid = self.__grabConsolidatedStack(rid)
             consolidated_rid, consolidated_timestamp = consolidated_stack.pop()
 
             # print(f"RID: {rid}, Base RID: {consolidated_rid}, Timestamp: {consolidated_timestamp}, Indirection RID: {indirection_rid}")
 
             # traverse through the tail pages based on the relative version
             current_version = 0
-            page_locations = self.table.page_directory[indirection_rid]
+            page_locations = self.table.page_ranges[page_range_index].logical_directory.get(indirection_rid, None)
             
-            while (indirection_rid != rid and current_version > relative_version):
+            while(indirection_rid != rid and current_version > relative_version):
                 current_version -= 1
-                
-                indir_page_range = None
-                tail_page_range = None
 
-                indir_tuple = self.__getPageTuple(indir_page_range, INDIRECTION_COLUMN, page_locations[1])
-                tail_tuple = self.__getPageTuple(tail_page_range, TIMESTAMP_COLUMN, page_locations[1])
+                indirection_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_locations[1])
+                tail_timestamp = self.table.bufferpool.read_page_slot(page_range_index, TIMESTAMP_COLUMN, page_locations[1])
 
-                indir_frame, indir_frame_num = indir_tuple
-                indirection_rid = indir_frame.page.get(page_locations[1])
-                self.bufferpool.mark_frame_used(indir_frame_num)
-
-                tail_frame, tail_frame_num = tail_tuple
-                tail_timestamp = tail_frame.page.get(page_locations[1])
-                self.bufferpool.mark_frame_used(tail_frame_num)
-
-                # Skip over newer consolidated pages
-                if (consolidated_timestamp > tail_timestamp):
+                if(consolidated_timestamp > tail_timestamp):
                     consolidated_rid, consolidated_timestamp = consolidated_stack.pop()
 
-                page_locations = self.table.page_directory[indirection_rid]
+                page_locations = self.table.page_ranges[page_range_index].logical_directory.get(indirection_rid, None)
 
             #print("Consolidated stack", consolidated_stack)
             #print("page Locations", page_locations)
             
             if (len(page_locations) > 1):
 
-                tail_page_range = None
-                tail_tuple = self.__getPageTuple(tail_page_range, TIMESTAMP_COLUMN, page_locations[1])
-                tail_frame, frame_num = tail_tuple
-                tail_timestamp = tail_frame.page.get(page_locations[1])
-                self.bufferpool.mark_frame_used(tail_frame_num)
+                tail_timestamp = self.table.bufferpool.read_page_slot(page_range_index, TIMESTAMP_COLUMN, page_locations[1])
 
                 while (indirection_rid != rid and tail_timestamp >= consolidated_timestamp and aggregate_column_value is None):
                     
-                    tail_page_range = None
-                    tail_tuple = self.__getPageTuple(tail_page_range, TIMESTAMP_COLUMN, page_locations[1])
-                    tail_frame, tail_frame_num = tail_tuple
-                    tail_timestamp = tail_frame.page.get(page_locations[1])
-                    
-                    schema_page_range = None
-                    schema_tuple = self.__getPageTuple(schema_page_range, SCHEMA_ENCODING_COLUMN, page_locations[1])
-                    schema_frame, schema_frame_num = schema_tuple
-                    schema_column = schema_frame.page.get(page_locations[1])
+                    schema_column = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, page_locations[1])
 
-                    self.bufferpool.mark_frame_used(schema_frame_num)
-                    self.bufferpool.mark_frame_used(tail_frame_num)
-                    
                     if (((schema_column >> aggregate_column_index) & 1 == 1)):
                         
-                        col_page_range = None
-                        col_tuple = self.__getPageTuple(col_page_range, NUM_HIDDEN_COLUMNS + aggregate_column_index, page_locations[1])
-                        col_frame, col_frame_num = col_tuple
-                        aggregate_column_value = col_frame.page.get(page_locations[1])
-                        self.bufferpool.mark_frame_used(col_frame_num)
+                        aggregate_column_value = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, page_locations[1])
 
                     
-                    indir_page_range = None
-                    indir_tuple = self.__getPageTuple(indir_page_range, INDIRECTION_COLUMN, page_locations[1])
-                    indir_frame, indir_frame_num = indir_tuple
-                    indirection_rid = indir_frame.page.get(page_locations[1])
-                    self.bufferpool.mark_frame_used(indir_frame_num)
-
-                    page_locations = self.table.page_directory[indirection_rid]
+                    indirection_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_locations[1])
+                    page_locations = self.table.page_ranges[page_range_index].logical_directory.get(indirection_rid, None)
 
             # if we were unsuccessful in finding an older version - this implies that indirection_rid == rid and we can
             # thus directly retrieve from the base/consolidated page
 
             if (aggregate_column_value is None):
-                consolidated_page_location = self.table.page_directory.get(consolidated_rid, None)
-                consolidated_page_index, consolidated_page_slot = consolidated_page_location[0]
-                tup = self.__getPageTuple(None, NUM_HIDDEN_COLUMNS + aggregate_column_index, consolidated_page_index)
-                frame, frame_num = tup
-                aggregate_column_value = frame.page.get(consolidated_page_slot)
-                self.bufferpool.mark_frame_used(frame_num)
+                consolidated_page_index, consolidated_page_slot = self.table.page_ranges[page_range_index].get_column_location(consolidated_rid, NUM_HIDDEN_COLUMNS + aggregate_column_index)
+                aggregate_column_value = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, consolidated_page_index, consolidated_page_slot)
                     
             sum_total += aggregate_column_value
         
@@ -450,76 +340,12 @@ class Query:
             return u
         return False
     
-
-    """
-    Starting from the base record’s indirection pointer, we want to go through all the 
-    base/consolidated records. Iterate through with until the column_page_locations tuple
-    is greater than 1, signifying the end of the base/consolidated records
-    """
-    def __getLatestConRid(self, base_rid):
-
-        # We are given the base rid so we want to start from here and iterate through all the consolidated pages if there are any
-        base_page_index, base_page_slot = self.table.page_directory[base_rid][0]
-
-        indir_tuple = self.__getPageTuple(None, INDIRECTION_COLUMN, base_page_index)
-        indir_frame, frame_num = indir_tuple
-        indir_rid = indir_frame.page.get(base_page_slot)
-        
-        # If no cons; newest is base
-        previous_rid = base_rid
-
-        ## This is moreso just for checking tuple length to ensure we're looking at a base/consolidated page
-        column_page_locations = self.table.page_directory[indir_rid]
-
-        self.bufferpool.mark_frame_used(frame_num)
-
-        # If there are consolidated pages w/ we walk them for indirection ptr that points to the latest tail
-        while(indir_rid != base_rid and len(column_page_locations) == 1):
-            
-            previous_rid = indir_rid
-            page_index, page_slot = column_page_locations[0]
-            
-            indir_tuple = self.__getPageTuple(None, INDIRECTION_COLUMN, page_index)
-            indir_frame, frame_num = indir_tuple
-            indir_rid = indir_frame.page.get(page_slot)
-            
-            column_page_locations = self.table.page_directory[indir_rid]
-            self.bufferpool.mark_frame_used(frame_num)
-
-        return previous_rid
-
     
-
-    """Helper function that writes the new record into the appropriate tail pages."""
-    def __writeTailRecord(self, new_record):
-
-        for i in range(self.table.total_num_columns):
-            
-            # Skip columns we're not updating
-            if(new_record.columns[i] is None):
-                continue
-
-            # If current tail page is full, append a new page
-            if(not self.table.tail_pages[i][-1].has_capacity()):
-                self.table.tail_pages[i].append(Page())
-
-            tail_page_index = len(self.table.tail_pages[i]) - 1
-            tail_tuple = self.__getPageTuple(None, NUM_HIDDEN_COLUMNS + i, tail_page_index)
-            tail_frame, frame_num = tail_tuple
-
-            # We don't really care where this tail record goes so we don't need to use precise_with_lock()
-            pos = tail_frame.write_with_lock(new_record.columns[i])
-
-            # Write this to the pd
-            self.table.page_directory[new_record.rid][i] = (tail_page_index, pos)
-            self.bufferpool.mark_frame_used(frame_num)
-
-
-
     def __grabConsolidatedStack(self, base_rid):
         '''Given a base rid returns the consolidated page's rid and timestamp in a stack and the indireciton rid to latest tail page'''
-        base_page_location = self.table.page_directory.get(base_rid, None)
-        if base_page_location is None:
+        page_range_index, page_index, page_slot = self.table.get_base_record_location(base_rid)
+        
+        if page_range_index is None:
             raise ValueError("Record not found in Page Directory")
         
         indirection_rid = None 
@@ -527,33 +353,15 @@ class Query:
         # stack to store the latest base/consolidated page's timestamp data
         base_pages_queue = []
         
-        while (len(base_page_location) == 1 and indirection_rid != base_rid):
-            base_page_number, base_page_index = base_page_location[0]
-
-            indir_tuple = self.__getPageTuple(None, INDIRECTION_COLUMN, base_page_number)
-            indir_frame, indir_frame_num = indir_tuple
-            indirection_rid = indir_frame.page.get(base_page_index)
-            self.bufferpool.mark_frame_used(indir_frame_num)
-
-
-            ts_tuple = self.__getPageTuple(None, TIMESTAMP_COLUMN, base_page_number)
-            ts_frame, ts_frame_num = ts_tuple
-            timestamp = ts_frame.page.get(base_page_index)
-            self.bufferpool.mark_frame_used(ts_frame_num)
-
+        while(len(self.table.page_ranges[page_range_index].logical_directory.get(prev_rid, [])) == 1 and indirection_rid != base_rid):
+            indirection_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
+            timestamp = self.table.bufferpool.read_page_slot(page_range_index, TIMESTAMP_COLUMN, page_index, page_slot)
             base_pages_queue.append((prev_rid, timestamp))
 
+            if(indirection_rid == base_rid or indirection_rid is None):
+                break  # Stop if we've looped back to the base record
+
             prev_rid = indirection_rid
-            base_page_location = self.table.page_directory.get(indirection_rid, None)
-
-        return base_pages_queue, indirection_rid
-
-    # Since we're moving to using tuples, it's easier to have a function that just gives the frame and frame num
-    def __getPageTuple(self, page_range_index, record_column, page_index):
-
-        frame = self.bufferpool.get_page_frame(page_range_index, record_column, page_index)
-        if(frame is None):
-            raise ValueError ("No tuple exists within given page range index")
+            page_index, page_slot = self.table.page_ranges[page_range_index].get_column_location(indirection_rid, INDIRECTION_COLUMN)
         
-        frame_num = self.bufferpool.get_page_frame_num(page_range_index, record_column, page_index)
-        return (frame, frame_num)
+        return base_pages_queue, indirection_rid
