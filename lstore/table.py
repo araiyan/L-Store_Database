@@ -65,7 +65,7 @@ class Table:
         record.rid = self.rid_index
         self.rid_index += 1
 
-    def get_base_record_location(self, rid):
+    def get_base_record_location(self, rid) -> tuple[int, int, int]:
         '''Returns the location of a record within base pages given a rid'''
         page_range_index = rid // (MAX_PAGE_RANGE * MAX_RECORD_PER_PAGE)
         page_index = rid % (MAX_PAGE_RANGE * MAX_RECORD_PER_PAGE) // MAX_RECORD_PER_PAGE
