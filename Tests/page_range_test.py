@@ -1,22 +1,47 @@
 import sys
 sys.path.append("..")
 
-from lstore.page import PageRange
+from lstore.page_range import PageRange
+from lstore.bufferpool import BufferPool
+from lstore.table import Table
 from lstore.config import NUM_HIDDEN_COLUMNS
 
 from random import choice, randint, sample, seed
+import unittest
 
-num_records = 1200
-num_columns = 3
 
-page_range = PageRange(num_columns)
+class TestPageRange(unittest.TestCase):
+  
+  def __init__(self, methodName = "runTest"):
+    super().__init__(methodName)
+    self.num_records = 24
+    self.num_columns = 3
+    self.table = Table("PageRangeTestTable", self.num_columns, 0, "TestDB")
+    self.bufferpool = BufferPool(self.table.table_path)
+    self.page_range = PageRange(0, self.num_columns, self.bufferpool)
+    self.records = {}
 
-for i in range(num_records):
-    record = []
-    for j in range(num_columns + NUM_HIDDEN_COLUMNS):
-        record.append(randint(0, 20))
+    for i in range(self.num_records):
+        self.records[i] = [randint(0, 100) for _ in range(self.num_columns)]
+        print(f"Created Record: {self.records[i]}")
 
-    print(record)
+    print("\n")
 
-    # prints page index and page slot of the record inserted
-    print(page_range.write(record), "\n")
+  def test_write_record(self):
+    # instantiate page
+    for i in range(self.num_records):
+        #print(f"Writing Record to PageRange: {self.records[i]}")
+        _, page_index, page_slot = self.table.get_base_record_location(i)
+        self.page_range.write_base_record(page_index, page_slot, *self.records[i])
+
+    # ensure tail page indexes are updated
+    self.assertNotEqual(self.page_range.tail_page_index, [0] * self.num_columns)
+    # logical directory should not be updated on base record write
+    self.assertEqual(self.page_range.logical_directory, {})
+
+    print("Test Page Range Base Record Write Passed")
+
+
+if __name__ == '__main__':
+  print("Running Page Range Test")
+  unittest.main()
