@@ -1,6 +1,7 @@
 from lstore.config import *
 from lstore.bufferpool import BufferPool
 import json
+from typing import Type
 
 class PageRange:
     '''
@@ -117,10 +118,13 @@ class PageRange:
     def __hash__(self):
         return self.page_range_index
     
-    def __eq__(self, other):
+    def __eq__(self, other:Type['PageRange']):
         return self.page_range_index == other.page_range_index
     
     def __str__(self):
+        return json.dumps(self.serialize())
+
+    def __repr__(self):
         return json.dumps(self.serialize())
     
     
