@@ -1,11 +1,14 @@
 from lstore.index import Index
-from lstore.page import Page
+from lstore.page_range import PageRange
 from time import time
 from lstore.config import *
 from lstore.bufferpool import BufferPool
-import os
 
+import os
+import threading
 import queue
+
+from typing import List
 
 class Record:
 
@@ -35,25 +38,26 @@ class Table:
         self.table_path = os.path.join(db_path, name)
         self.num_columns = num_columns
         self.total_num_columns = num_columns + NUM_HIDDEN_COLUMNS
+
         self.page_directory = {}
+        '''
+        Page direcotry will map rids to consolidated rids
+        page_directory[rid] = consolidated_rid
+        consolidated_rid is treated the same as a base_rid
+        Table_merge should be the only function that modifies the page_directory
+        All others can access the page_dierctory
+        '''
+        self.page_directory_lock = threading.Lock()
         self.index = Index(self)
 
         # initialize bufferpool in table, not DB
         self.bufferpool = BufferPool(self.table_path)
-        
-        self.base_pages = {}
-        self.tail_pages = {}
-        self.tail_pages_prev_merge = [0] * self.num_columns
-        '''Keeps track of the number of tail pages that have been merged'''
-
+        self.page_ranges:List[PageRange] = []
+    
         self.diallocation_rid_queue = queue.Queue()
 
         # The table should handle assigning RIDs
         self.rid_index = 0
-
-        for i in range(self.total_num_columns):
-            self.base_pages[i] = [Page()]
-            self.tail_pages[i] = [Page()]
 
     def assign_rid_to_record(self, record: Record):
         '''Use this function to assign a record's RID'''
@@ -69,24 +73,15 @@ class Table:
         return (page_range_index, page_index, page_slot)
 
     def insert_record(self, record: Record):
-        if (self.index.locate(self.key, record.columns[NUM_HIDDEN_COLUMNS + self.key])):
-            raise ValueError("Error inserting record to table! Duplicate primary key found")
+        page_range_index, page_index, page_slot = self.get_base_record_location(record.rid)
+
+        if (page_range_index >= len(self.page_ranges)):
+            self.page_ranges.append(PageRange(page_range_index, self.num_columns, self.bufferpool))
         
-        for i in range(self.total_num_columns):
-            if (not self.base_pages[i][-1].has_capacity()):
-                self.base_pages[i].append(Page())
+        current_page_range:PageRange = self.page_ranges[page_range_index]
 
-            # Points to the last page in the list of pages for the current column
-            curr_page:Page = self.base_pages[i][-1] 
+        current_page_range.write_base_record(page_index, page_slot, *record.columns)
 
-            page_index = curr_page.num_records
-            curr_page.write(record.columns[i])
-            
-
-            # Each directory entry contains the page# and the index# within that page
-            # Note: Subject to change if each column's data isn't an integer
-            if (i == RID_COLUMN):
-                self.page_directory[record.rid] = [(len(self.base_pages[i]) - 1, page_index)]
                 
 
     def update_record(self, record: Record):
