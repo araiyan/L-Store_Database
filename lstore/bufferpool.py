@@ -42,8 +42,8 @@ class Frame:
                 page_json_data = json.load(page_file)
             self.page.deserialize(page_json_data)
         else:
-            with self._write_lock:
-                self.dirty = True
+            os.makedirs(os.path.dirname(page_path), exist_ok=True)
+            self.dirty = True
 
         self._write_lock.release()
 
@@ -76,6 +76,12 @@ class Frame:
             self.dirty = True
             return self.page.write(value)
 
+    
+    def get_page_capacity(self) -> bool:
+        '''Returns True if the page has capacity for more records'''
+        with self._write_lock:
+            return self.page.has_capacity()
+
     def increment_pin(self):
         '''Increments the pin count'''
         with self._pin_lock:
@@ -86,7 +92,7 @@ class Frame:
         with self._pin_lock:
             self.pin -= 1
 
-class Bufferpool:
+class BufferPool:
     '''Every access to pages should go through the bufferpool'''
     def __init__(self, table_path):
         self.frame_directory = dict()
@@ -117,9 +123,26 @@ class Bufferpool:
             return current_frame
         
         current_frame:Frame = self.frames[page_frame_num]
+        current_frame.increment_pin()
         return current_frame
     
-    def get_page_slot(self, page_range_index, record_column, page_index, slot_index) -> Union[int, None]:
+    def get_page_has_capacity(self, page_range_index, record_column, page_index) -> Union[bool, None]:
+        '''Returns True if the page has capacity for more records'''
+        page_disk_path = self.get_page_path(page_range_index, record_column, page_index)
+        page_frame_num = self.frame_directory.get(page_disk_path, None)
+
+        if (page_frame_num is None):
+            # If no frames are available and we were unable to diallocate frames due to lock then returns None
+            if (self.available_frames_queue.empty() and not self.__replacement_policy()):
+                return None
+            
+            current_frame:Frame = self.__load_new_frame(page_disk_path)
+            return current_frame.get_page_capacity()
+        
+        current_frame:Frame = self.frames[page_frame_num]
+        return current_frame.get_page_capacity()
+    
+    def read_page_slot(self, page_range_index, record_column, page_index, slot_index) -> Union[int, None]:
         '''Returns the value within a page if the page can be grabbed from disk,
         otherwise returns None'''
         page_disk_path = self.get_page_path(page_range_index, record_column, page_index)
@@ -140,21 +163,39 @@ class Bufferpool:
         '''Writes a value to a page slot'''
         page_disk_path = self.get_page_path(page_range_index, record_column, page_index)
         page_frame_num = self.frame_directory.get(page_disk_path, None)
+        current_frame:Frame = None
 
         if (page_frame_num is None):
             if (self.available_frames_queue.empty() and not self.__replacement_policy()):
                 return False
 
             current_frame:Frame = self.__load_new_frame(page_disk_path)
-            current_frame.write_precise_with_lock(slot_index, value)
-            current_frame.decrement_pin()
-            return True
+        else:
+            current_frame:Frame = self.frames[page_frame_num]
+            current_frame.increment_pin()
 
-        current_frame:Frame = self.frames[page_frame_num]
-        current_frame.increment_pin()
         current_frame.write_precise_with_lock(slot_index, value)
         current_frame.decrement_pin()
         return True
+    
+    def write_page_next(self, page_range_index, record_column, page_index, value) -> Union[int, None]:
+        '''Write a value to page and returns the slot it was written to, returns None if unable to locate frame'''
+        page_disk_path = self.get_page_path(page_range_index, record_column, page_index)
+        page_frame_num = self.frame_directory.get(page_disk_path, None)
+        current_frame:Frame = None
+
+        if (page_frame_num is None):
+            if (self.available_frames_queue.empty() and not self.__replacement_policy()):
+                return None
+
+            current_frame:Frame = self.__load_new_frame(page_disk_path)
+        else:
+            current_frame:Frame = self.frames[page_frame_num]
+            current_frame.increment_pin()
+
+        slot_index = current_frame.write_with_lock(value)
+        current_frame.decrement_pin()
+        return slot_index
     
     def get_page_frame_num(self, page_range_index, record_column, page_index) -> Union[int, None]:
         '''Returns the frame number of the page if the page is in memory, otherwise returns None'''
@@ -163,11 +204,15 @@ class Bufferpool:
 
     def get_page_path(self, page_range_index, record_column, page_index) -> str:
         '''Returns the path of the page'''
-        return os.path.join(f"PageRange_{page_range_index}", f"Page_{record_column}_{page_index}.bin")
+        return os.path.join(self.table_path, os.path.join(f"PageRange_{page_range_index}", f"Page_{record_column}_{page_index}.bin"))
     
     def mark_frame_used(self, frame_num):
         '''Use this to close a frame once a page has been used'''
         self.frames[frame_num].decrement_pin()
+
+    def unload_all_frames(self):
+        '''Unloads all frames in the bufferpool'''
+        self.__replacement_policy()
 
     def __load_new_frame(self, page_path:str) -> Frame:
         '''Loads a new frame into the bufferpool'''
@@ -177,13 +222,31 @@ class Bufferpool:
         current_frame:Frame = self.frames[page_frame_num]
         current_frame.increment_pin()
 
-        full_page_path = os.path.join(self.table_path, page_path)
-        current_frame.load_page(full_page_path)
+        current_frame.load_page(page_path)
         self.frame_directory[page_path] = page_frame_num
+        #print(f"Loading frame {page_frame_num} with {page_path}")
 
         self.unavailable_frames_queue.put(page_frame_num)
 
         return current_frame
+    
+    # Refactoring in progress
+    # def __frame_load_policy(self, page_disk_path) -> Frame:
+    #     '''Returns a frame with the disk path, returns false if failed'''
+    #     page_frame_num = self.frame_directory.get(page_disk_path, None)
+    #     current_frame:Frame = None
+
+    #     if (page_frame_num is None):
+    #         if (self.available_frames_queue.empty() and not self.__replacement_policy()):
+    #             # If no frames are available and we were unable to diallocate frames due to lock then returns None
+    #             return False
+
+    #         current_frame:Frame = self.__load_new_frame(page_disk_path)
+    #     else:
+    #         current_frame:Frame = self.frames[page_frame_num]
+    #         current_frame.increment_pin()
+
+    #     return current_frame
         
     def __replacement_policy(self) -> bool:
         '''
@@ -198,7 +261,9 @@ class Bufferpool:
             current_frame:Frame = self.frames[frame_num]
 
             if (current_frame.pin == 0):
+                #print(f"deleting {current_frame.page_path} from frame_directory")
                 # If the frame is not being used by any processes then we can deallocate it
+                del self.frame_directory[current_frame.page_path]
                 current_frame.unload_page()
                 self.available_frames_queue.put(frame_num)
                 replacement_success = True
