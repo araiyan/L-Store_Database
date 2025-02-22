@@ -109,11 +109,11 @@ class PageRange:
             "tail_page_index": self.tail_page_index,
             "logical_rid_index": self.logical_rid_index,
             "tps": self.tps
-         }
+        }
     
     def deserialize(self, json_data):
         '''Loads a page from serialized data'''
-        self.logical_directory = json_data["logical_directory"]
+        self.logical_directory = {int(k): v for k, v in json_data["logical_directory"].items()}
         self.tail_page_index = json_data["tail_page_index"]
         self.logical_rid_index = json_data["logical_rid_index"]
         self.tps = json_data["tps"]
