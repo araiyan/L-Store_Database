@@ -42,8 +42,8 @@ class Frame:
                 page_json_data = json.load(page_file)
             self.page.deserialize(page_json_data)
         else:
-            with self._write_lock:
-                self.dirty = True
+            os.makedirs(os.path.dirname(page_path), exist_ok=True)
+            self.dirty = True
 
         self._write_lock.release()
 
@@ -75,6 +75,7 @@ class Frame:
         with self._write_lock:
             self.dirty = True
             return self.page.write(value)
+
     
     def get_page_capacity(self) -> bool:
         '''Returns True if the page has capacity for more records'''
@@ -203,11 +204,15 @@ class BufferPool:
 
     def get_page_path(self, page_range_index, record_column, page_index) -> str:
         '''Returns the path of the page'''
-        return os.path.join(f"PageRange_{page_range_index}", f"Page_{record_column}_{page_index}.bin")
+        return os.path.join(self.table_path, os.path.join(f"PageRange_{page_range_index}", f"Page_{record_column}_{page_index}.bin"))
     
     def mark_frame_used(self, frame_num):
         '''Use this to close a frame once a page has been used'''
         self.frames[frame_num].decrement_pin()
+
+    def unload_all_frames(self):
+        '''Unloads all frames in the bufferpool'''
+        self.__replacement_policy()
 
     def __load_new_frame(self, page_path:str) -> Frame:
         '''Loads a new frame into the bufferpool'''
@@ -217,9 +222,9 @@ class BufferPool:
         current_frame:Frame = self.frames[page_frame_num]
         current_frame.increment_pin()
 
-        full_page_path = os.path.join(self.table_path, page_path)
-        current_frame.load_page(full_page_path)
+        current_frame.load_page(page_path)
         self.frame_directory[page_path] = page_frame_num
+        #print(f"Loading frame {page_frame_num} with {page_path}")
 
         self.unavailable_frames_queue.put(page_frame_num)
 
@@ -256,7 +261,9 @@ class BufferPool:
             current_frame:Frame = self.frames[frame_num]
 
             if (current_frame.pin == 0):
+                #print(f"deleting {current_frame.page_path} from frame_directory")
                 # If the frame is not being used by any processes then we can deallocate it
+                del self.frame_directory[current_frame.page_path]
                 current_frame.unload_page()
                 self.available_frames_queue.put(frame_num)
                 replacement_success = True

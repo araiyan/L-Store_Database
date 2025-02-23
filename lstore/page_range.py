@@ -53,6 +53,9 @@ class PageRange:
         self.logical_directory[logical_rid] = [None] * (self.total_num_columns - NUM_HIDDEN_COLUMNS)
 
         for (i, column) in enumerate(columns):
+            if (column is None):
+                continue
+            
             # If current tail page doesn't have capacity move to the next tail page
             has_capacity =  self.bufferpool.get_page_has_capacity(self.page_range_index, i, self.tail_page_index[i])
 
@@ -65,7 +68,7 @@ class PageRange:
 
             # we can skip mapping hidden columns since they are partitioned equally
             if (i >= NUM_HIDDEN_COLUMNS):
-                self.logical_directory[logical_rid][i] = (self.tail_page_index[i] * MAX_RECORD_PER_PAGE) + page_slot
+                self.logical_directory[logical_rid][i - NUM_HIDDEN_COLUMNS] = (self.tail_page_index[i] * MAX_RECORD_PER_PAGE) + page_slot
 
         return True
     
@@ -106,11 +109,11 @@ class PageRange:
             "tail_page_index": self.tail_page_index,
             "logical_rid_index": self.logical_rid_index,
             "tps": self.tps
-         }
+        }
     
     def deserialize(self, json_data):
         '''Loads a page from serialized data'''
-        self.logical_directory = json_data["logical_directory"]
+        self.logical_directory = {int(k): v for k, v in json_data["logical_directory"].items()}
         self.tail_page_index = json_data["tail_page_index"]
         self.logical_rid_index = json_data["logical_rid_index"]
         self.tps = json_data["tps"]
