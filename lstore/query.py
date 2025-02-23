@@ -18,7 +18,6 @@ class Query:
     """
     def __init__(self, table):
         self.table:Table = table
-        self.bufferpool:BufferPool = self.table.bufferpool
         pass
 
     
