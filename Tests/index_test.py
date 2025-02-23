@@ -41,11 +41,16 @@ class TestIndexMethods(unittest.TestCase):
         keys = sorted(list(records.keys()))
         print("Insert finished")
 
-        grades_table.index.serialize_value_mapper()
-        grades_table.index.deserialize_value_mapper()
-        for item in all_keys:
-            print(grades_table.index.locate(grades_table.key, item))
-            print(grades_table.index.value_mapper[item])
+        grades_table.index.create_index(1)
+        print(dict(grades_table.index.indices[1]))
+        
+
+        grades_table.index.serialize_all_indices()
+        grades_table.index.deserialize_all_indices()
+
+        #for item in all_keys:
+        #    print(grades_table.index.locate(grades_table.key, item))
+        #    print(grades_table.index.value_mapper[item])
             
         """
         # Student id, Key, Age, Grade
