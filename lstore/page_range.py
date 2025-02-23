@@ -94,6 +94,12 @@ class PageRange:
 
         return True
     
+    def read_tail_record_column(self, logical_rid, column) -> int:
+        '''Reads a column from the tail pages given a logical rid'''
+        page_index, page_slot = self.get_column_location(logical_rid, column)
+        column_value = self.bufferpool.read_page_slot(self.page_range_index, column, page_index, page_slot)
+        return column_value
+    
     # Only use this function for API calls
     def get_column_location(self, logical_rid, column) -> tuple[int, int]:
         '''Returns the location of a column within tail pages given a logical rid'''

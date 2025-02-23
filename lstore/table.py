@@ -82,7 +82,7 @@ class Table:
         
         current_page_range:PageRange = self.page_ranges[page_range_index]
 
-        current_page_range.write_base_record(page_index, page_slot, *record.columns)    
+        current_page_range.write_base_record(page_index, page_slot, *record.columns)   
     
     def __merge(self):
         print("Merge is happening")
@@ -108,14 +108,28 @@ class Table:
                     base_merge_time = 0
                     if (self.__insert_base_copy_to_tail_pages(current_page_range, base_record_columns) is False):
                         continue
+
+                # Get the latest record
+                current_rid = base_record_columns[INDIRECTION_COLUMN]
+                latest_schema_encoding = base_record_columns[SCHEMA_ENCODING_COLUMN]
+                current_time_stamp = current_page_range.read_tail_record_column(current_rid, TIMESTAMP_COLUMN)
+
+                # if current rid < MAX_RECORD_PER_PAGE_RANGE, then we are at the base record
+                while current_rid >= MAX_RECORD_PER_PAGE_RANGE and latest_schema_encoding != 0 and current_time_stamp > base_merge_time:
+                    indirection_column = current_page_range.read_tail_record_column(current_rid, INDIRECTION_COLUMN)
+                    schema_encoding = current_page_range.read_tail_record_column(current_rid, SCHEMA_ENCODING_COLUMN)
+                    current_time_stamp = current_page_range.read_tail_record_column(current_rid, TIMESTAMP_COLUMN)
+                    
+                    for col_index in range(self.num_columns):
+                        if (latest_schema_encoding & (1 << col_index)) and (schema_encoding & (1 << col_index)):
+                            latest_schema_encoding ^= (1 << col_index)
+                            base_record_columns[col_index + NUM_HIDDEN_COLUMNS] = current_page_range.read_tail_record_column(current_rid, col_index + NUM_HIDDEN_COLUMNS)
+
+                    current_rid = indirection_column
                 
-                
-                
+
                 base_record_columns[UPDATE_TIMESTAMP_COLUMN] = time()
-
-                record = current_page_range.read_base_record(page_index, page_slot)
-                self.insert_record(record)
-
+                current_page_range.write_base_record(page_index, page_slot, *base_record_columns)
             
 
             self.merge_queue.task_done()
