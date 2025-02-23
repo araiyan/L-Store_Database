@@ -1,5 +1,5 @@
 from lstore.index import Index
-from lstore.page_range import PageRange
+from lstore.page_range import PageRange, MergeRequest
 from time import time
 from lstore.config import *
 from lstore.bufferpool import BufferPool
@@ -63,14 +63,14 @@ class Table:
 
     def assign_rid_to_record(self, record: Record):
         '''Use this function to assign a record's RID'''
-        
-        record.rid = self.rid_index
-        self.rid_index += 1
+        with self.page_directory_lock:
+            record.rid = self.rid_index
+            self.rid_index += 1
 
     def get_base_record_location(self, rid) -> tuple[int, int, int]:
         '''Returns the location of a record within base pages given a rid'''
-        page_range_index = rid // (MAX_PAGE_RANGE * MAX_RECORD_PER_PAGE)
-        page_index = rid % (MAX_PAGE_RANGE * MAX_RECORD_PER_PAGE) // MAX_RECORD_PER_PAGE
+        page_range_index = rid // (MAX_RECORD_PER_PAGE_RANGE)
+        page_index = rid % (MAX_RECORD_PER_PAGE_RANGE) // MAX_RECORD_PER_PAGE
         page_slot = rid % MAX_RECORD_PER_PAGE
         return (page_range_index, page_index, page_slot)
 
@@ -82,24 +82,7 @@ class Table:
         
         current_page_range:PageRange = self.page_ranges[page_range_index]
 
-        current_page_range.write_base_record(page_index, page_slot, *record.columns)
-
-    
-    def grab_tail_value_from_page_location(self, tail_location, column):
-        page_index, page_slot = tail_location[column]
-        return self.tail_pages[column][page_index].get(page_slot)
-        
-    def __grab_tail_value_from_rid(self, rid, column, base_page=False):
-        '''Given a records rid and column number this function returns tail page value in that specific physical location'''
-        page_index, page_slot = self.page_directory[rid][column]
-        if (base_page):
-            return self.base_pages[column][page_index].get(page_slot)
-        return self.tail_pages[column][page_index].get(page_slot)
-    
-    def __grab_tail_value_from_page_location(self, column, tail_page_location):
-        '''Given a tuple of page index and page slot return the value in the tail page of the specific column'''
-        return self.tail_pages[column][tail_page_location[0]][tail_page_location[1]]
-    
+        current_page_range.write_base_record(page_index, page_slot, *record.columns)    
     
     def __merge(self):
         print("Merge is happening")
@@ -107,15 +90,53 @@ class Table:
         while True:
             # Block ensures that we wait for a record to be added to the queue first
             # before we continue merging a record
-
-            rid = self.merge_queue.get(block=True)
+            merge_request:MergeRequest = self.merge_queue.get(block=True)
 
             # make a copy of the base page for the recieved rid
-            page_range_index, page_index, page_slot = self.get_base_record_location(rid)
+            start_rid = merge_request.page_range_index * MAX_RECORD_PER_PAGE_RANGE
+            end_rid = min(start_rid + MAX_RECORD_PER_PAGE_RANGE, self.rid_index)
+
+            current_page_range:PageRange = self.page_ranges[merge_request.page_range_index]
+
+            for rid in range(start_rid, end_rid):
+                _, page_index, page_slot = self.get_base_record_location(rid)
+
+                base_record_columns = current_page_range.copy_base_record(page_index, page_slot)
+                base_merge_time = base_record_columns[UPDATE_TIMESTAMP_COLUMN]
+
+                if (base_merge_time is None):
+                    base_merge_time = 0
+                    if (self.__insert_base_copy_to_tail_pages(current_page_range, base_record_columns) is False):
+                        continue
+                
+                
+                
+                base_record_columns[UPDATE_TIMESTAMP_COLUMN] = time()
+
+                record = current_page_range.read_base_record(page_index, page_slot)
+                self.insert_record(record)
 
             
 
             self.merge_queue.task_done()
+
+    def __insert_base_copy_to_tail_pages(self, page_range:PageRange, base_record_columns):
+        '''Inserts a copy of the base record to the last tail page of the record'''
+        logical_rid = page_range.assign_logical_rid()
+        indirection_rid = base_record_columns[INDIRECTION_COLUMN]
+        last_indirection_rid = page_range.find_records_last_logical_rid(indirection_rid)
+
+        # if no tail record exist return false
+        if (last_indirection_rid == indirection_rid):
+            return False
+        
+        page_index, page_slot = page_range.get_column_location(last_indirection_rid, INDIRECTION_COLUMN)
+        page_range.write_tail_record(logical_rid, *base_record_columns)
+
+        # edit the last page's indirection column to point to the new copied base record
+        self.bufferpool.write_page_slot(page_range.page_range_index, INDIRECTION_COLUMN, page_index, page_slot, logical_rid)
+
+        return True
         
     def serialize(self):
         """Returns table metadata as a JSON-compatible dictionary"""
