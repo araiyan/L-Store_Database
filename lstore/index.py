@@ -34,9 +34,10 @@ class Index:
             os.makedirs(self.index_directory)
 
         #primary index and value mapper are recreated upon reopening db
-        #self.__generate_primary_index()
 
         self.deserialize_all_indices()
+
+        self.__generate_primary_index()
 
 
 
@@ -100,6 +101,12 @@ class Index:
 
             self.indices[column_number].clear()
             self.indices[column_number] = None
+
+            #delete file 
+            path = os.path.join(self.index_directory, f"index_{column_number}.pkl")
+            if os.path.isfile(path):
+                os.remove(path)
+
             return True
         # if the index trying to drop doesn't exist in the dict of secondary indices
         else:
