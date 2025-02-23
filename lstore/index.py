@@ -64,6 +64,7 @@ class Index:
     # optional: Create index on specific columns 
     # index will have key and column mapped as {key_column_value1: [value_column_value1]}
     # or {key_column_value1: [value_column_value1, value_column_value2...]} if more than one value maps to the same key
+    # create secondary index through primary index and value mapper
     """
     def create_index(self, column_number):
         #deserialize value_mapper if lost
@@ -87,6 +88,41 @@ class Index:
             return True
         else:
             return False
+
+    """
+    # create secondary index through page range and bufferpool    
+    def create_index(self, column_number):
+        #deserialize value_mapper if lost
+
+        if column_number >= self.table.num_columns:
+            return False
+
+        if self.indices[column_number] == None:
+
+            self.indices[column_number] = OOBTree()
+
+            # go through value mapper to create new index
+            all_base_rids = self.table.grab_all_base_rid()
+
+            #read through bufferpool to get latest tail record
+            for rid in all_base_rids:
+
+                page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
+                indir_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
+                
+                # check for consolidated page and/or tail page
+                if indir_rid != rid:
+                    page_index, page_slot = self.table.page_ranges[page_range_index].get_column_location(indir_rid, column_number)
+ 
+                column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number, page_index, page_slot)
+
+                #insert {primary_index: {rid: True}} into primary index BTree
+                self.insert_to_index(column_number, column_value, rid)
+
+            return True
+        else:
+            return False
+    """
 
     """
     # optional: Drop index of specific column
