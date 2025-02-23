@@ -55,6 +55,8 @@ class Table:
         self.page_ranges:List[PageRange] = []
     
         self.diallocation_rid_queue = queue.Queue()
+        self.merge_queue = queue.Queue()
+        '''stores the base rid of a record to be merged'''
 
         # The table should handle assigning RIDs
         self.rid_index = 0
@@ -82,71 +84,6 @@ class Table:
 
         current_page_range.write_base_record(page_index, page_slot, *record.columns)
 
-                
-
-    def update_record(self, record: Record):
-        origin_rid = self.index.locate(self.key, record.columns[NUM_HIDDEN_COLUMNS + self.key])
-
-        if (origin_rid is None):
-            raise ValueError("Error updating record! Record with primary key does not exist")
-        
-        for i in range(self.total_num_columns):
-            if (record.columns[i] is None):
-                continue
-
-            if (not self.tail_pages[i][-1].has_capacity()):
-                self.tail_pages[i].append(Page())
-
-            curr_page:Page = self.tail_pages[i][-1]
-
-            curr_page.write(record.columns[i])
-            page_index = curr_page.num_records
-
-            # TODO: Kind of a hack way of doing it. Need to improve indexing updated columns once pages is solidified
-            self.page_directory[record.rid][i] = [len(self.tail_pages[i]) - 1, page_index]
-
-        # updates the indirection column on the base page for new tail page
-        page_index, page_slot = self.page_directory[origin_rid]
-        self.base_pages[page_index].write_precise(page_slot, record.rid)
-
-        # TODO: Query update should implement this
-
-
-    def get_record(self, record_primary_key) -> Record:
-        '''Grab the most updated record on the table with matching primary key'''
-        origin_rid = self.index.locate(self.key, record_primary_key)
-        if (origin_rid is None):
-            raise ValueError("Error getting record! Record with the given primary key does not exist")
-
-        page_index, page_slot = self.page_directory[origin_rid]
-        record_columns = []
-
-        # Crafting the base page record
-        for i in range(self.total_num_columns):
-            column_value = self.base_pages[i][page_index].get(page_slot)
-            record_columns.append(column_value)
-
-        indirection_rid = record_columns[INDIRECTION_COLUMN]
-
-        # when we have the most updated records records_fill_schema will look like 11111... in binary
-        record_fill_schema = 0
-        record_fill_max_schema = (2 ** self.num_columns) - 1
-
-        while (indirection_rid != origin_rid and record_fill_schema < record_fill_max_schema):
-            record_schema = self.__grab_tail_value_from_rid(indirection_rid, SCHEMA_ENCODING_COLUMN)
-            for i in range(NUM_HIDDEN_COLUMNS, self.total_num_columns):
-                # if the record has not been filled
-                if (((record_fill_schema >> i) & 1) == 0):
-                    # checks schema from last to first going right to left
-                    update_bit = (record_schema >> i) & 1
-
-                    if (update_bit):
-                        record_fill_schema += (1 << i)
-                        record_columns[i] = self.__grab_tail_value_from_rid(indirection_rid, i)
-
-            indirection_rid = self.__grab_tail_value_from_rid(indirection_rid, INDIRECTION_COLUMN)
-
-        return Record(origin_rid, self.key, record_columns)
     
     def grab_tail_value_from_page_location(self, tail_location, column):
         page_index, page_slot = tail_location[column]
@@ -167,99 +104,18 @@ class Table:
     def __merge(self):
         print("Merge is happening")
 
-        # Here were using rid column because it will always get filled out first
-        if (len(self.tail_pages[RID_COLUMN]) - self.tail_pages_prev_merge[RID_COLUMN]) < MAX_TAIL_PAGES_BEFORE_MERGING:
-            return False
-            
-        # Grabs all records rid
-        # TODO: If each indicy is a binary tree we need to iterate through the binary tree and grab all rids
-        all_rids = self.index.indices[self.key].grab_all()
+        while True:
+            # Block ensures that we wait for a record to be added to the queue first
+            # before we continue merging a record
 
-        # for each rid grab the most updated columns
-        for _, base_rid in enumerate(all_rids):
-            # get the base page of the record
-            page_index, page_slot = self.page_directory[base_rid][0]
-            print(f"Merge -> page index: {page_index} page slot: {page_slot}")
+            rid = self.merge_queue.get(block=True)
 
-            indirection_rid = self.base_pages[INDIRECTION_COLUMN][page_index].get(page_slot)
-            column_page_locations = self.page_directory[indirection_rid]
-
-            # iterate through all the consolidated pages
-            while (indirection_rid != base_rid and len(column_page_locations) == 1):
-                page_index, page_slot = column_page_locations[0]
-                indirection_rid = self.base_pages[INDIRECTION_COLUMN][page_index].get(page_slot)
-                column_page_locations = self.page_directory[indirection_rid]
-
-            # form our consolidated record
-            consolidated_record = Record(0, self.key, [0] * self.total_num_columns)
-            self.assign_rid_to_record(consolidated_record)
-
-            latest_base_page_index = page_index
-            latest_base_page_slot = page_slot
-
-            # have the consolidated indirection_rid point towards the latest tail record
-            consolidated_indirection_rid = indirection_rid
-
-            for i in range(self.num_columns):
-                consolidated_record.columns[NUM_HIDDEN_COLUMNS + i] = self.base_pages[i + NUM_HIDDEN_COLUMNS][page_index].get(page_slot)
-
-            consolidated_time_stamp = self.base_pages[TIMESTAMP_COLUMN][page_index].get(page_slot)
-
-            # when we have the most updated records records_fill_schema will look like 11111... in binary
-            record_fill_schema = (2 ** self.key) # flipping key schema bit since key is never updated
-            record_fill_max_schema = (2 ** self.num_columns) - 1
-
-            while (indirection_rid != base_rid and record_fill_schema < record_fill_max_schema):
-                column_page_locations = self.page_directory[indirection_rid]
-                if len(column_page_locations) < self.total_num_columns:
-                    raise ValueError("Error Inside Merge: could not locate tail page. Current page locations: ", column_page_locations)
-                
-                tail_page_time_stamp = self.__grab_tail_value_from_page_location(TIMESTAMP_COLUMN, column_page_locations[TIMESTAMP_COLUMN])
-
-                # if tail page is not updated we have the most updated data
-                if (tail_page_time_stamp < consolidated_time_stamp):
-                    break
-
-                tail_page_schema = self.__grab_tail_value_from_page_location(SCHEMA_ENCODING_COLUMN, column_page_locations[SCHEMA_ENCODING_COLUMN])
-
-                for i in range(self.num_columns):
-                    # if the record has not been filled
-                    if (((record_fill_schema >> i) & 1) == 0):
-                        # checks schema from last to first going right to left
-                        update_bit = (tail_page_schema >> i) & 1
-
-                        if (update_bit):
-                            record_fill_schema += (1 << i)
-                            consolidated_record.columns[-(i+1)] = self.__grab_tail_value_from_page_location(-(i+1), column_page_locations[-(i+1)])
-
-                indirection_rid = self.__grab_tail_value_from_page_location(INDIRECTION_COLUMN, column_page_locations[INDIRECTION_COLUMN])
+            # make a copy of the base page for the recieved rid
+            page_range_index, page_index, page_slot = self.get_base_record_location(rid)
 
             
-            # Now we have the most consolidated record for the rid
-            consolidated_record.columns[INDIRECTION_COLUMN] = consolidated_indirection_rid
-            consolidated_record.columns[SCHEMA_ENCODING_COLUMN] = 0
-            consolidated_record.columns[RID_COLUMN] = consolidated_record.rid
-            consolidated_record.columns[TIMESTAMP_COLUMN] = time()
 
-            # Insert the consolidated column into a consolidated base page
-            for i in range(self.total_num_columns):
-                if (not self.base_pages[i][-1].has_capacity()):
-                    self.base_pages[i].append(Page())
-
-                # Points to the last page in the list of pages for the current column
-                curr_page:Page = self.base_pages[i][-1] 
-                curr_page.write(consolidated_record.columns[i])
-                
-
-                if (i == RID_COLUMN):
-                    self.page_directory[consolidated_record.rid] = [(len(self.base_pages[i]) - 1, curr_page.num_records - 1)]
-
-            # have the base_page or latest consolidated_page point to the new consolidated record
-            self.base_pages[INDIRECTION_COLUMN][latest_base_page_index].write_precise(latest_base_page_slot, consolidated_record.rid)
-
-        # update the merged tails page index
-        for i in range(self.total_num_columns):
-            self.tail_pages_prev_merge[i] = len(self.tail_pages[i]) - 1
+            self.merge_queue.task_done()
         
     def serialize(self):
         """Returns table metadata as a JSON-compatible dictionary"""
