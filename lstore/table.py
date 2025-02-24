@@ -69,8 +69,13 @@ class Table:
     def assign_rid_to_record(self, record: Record):
         '''Use this function to assign a record's RID'''
         with self.page_directory_lock:
-            record.rid = self.rid_index
-            self.rid_index += 1
+            
+            # recycle unused RIDs
+            if not self.diallocation_rid_queue.empty():
+                record.rid = self.diallocation_rid_queue.get()
+            else:
+                record.rid = self.rid_index
+                self.rid_index += 1
 
     def get_base_record_location(self, rid) -> tuple[int, int, int]:
         '''Returns the location of a record within base pages given a rid'''
@@ -166,3 +171,17 @@ class Table:
             "rid_index": self.rid_index
         }
 
+    def delete(self, rid):
+        '''Marks a record as deleted and makes its RID available for reallocation (diallocation_rid_queue)'''
+
+        # check to ensure record exists
+        if rid not in self.page_directory:
+            return False
+        
+        page_range_idx, page_idx, page_slot = self.get_base_record_location(rid)
+
+        # update value in base page indirection column to deleted
+        self.bufferpool.write_page_slot(page_range_idx, INDIRECTION_COLUMN, page_idx, page_slot, RECORD_DELETION_FLAG)
+        self.diallocation_rid_queue.put(rid)
+
+        return True
