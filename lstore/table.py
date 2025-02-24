@@ -196,15 +196,9 @@ class Table:
         # Recreate Index
         self.index.deserialize(data['index'])
 
-        # Recreate Page Ranges with required arguments
-        self.page_ranges = []
         for idx, pr_data in enumerate(data['page_ranges']):
         # Fix: Pass required arguments for PageRange
-            page_range = PageRange(
-                page_range_index=idx,          # Page Range Index
-                num_columns=self.num_columns,  # Number of Columns
-                bufferpool=self.bufferpool     # Buffer Pool
-            )
+            page_range = PageRange(idx, self.num_columns, self.bufferpool, self.merge_queue)
             page_range.deserialize(pr_data)
             self.page_ranges.append(page_range)
             
