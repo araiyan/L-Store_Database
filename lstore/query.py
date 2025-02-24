@@ -5,7 +5,9 @@ from lstore.page_range import PageRange
 from lstore.config import *
 from lstore.bufferpool import BufferPool, Frame
 
+
 from time import time
+from math import floor
 
 class Query:
     """
@@ -16,7 +18,6 @@ class Query:
     """
     def __init__(self, table):
         self.table:Table = table
-        self.bufferpool:BufferPool = self.table.bufferpool
         pass
 
     
@@ -182,7 +183,7 @@ class Query:
                             break
 
                     indirection_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_locations[1])
-                    page_locations = self.table.page_directory.get(indirection_rid, None)
+                    page_locations = self.table.page_ranges[page_range_index].logical_directory.get(indirection_rid, None)
                     
                     if page_locations is not None:
                         tail_timestamp = self.table.bufferpool.read_page_slot(page_range_index, TIMESTAMP_COLUMN, page_locations[1])
