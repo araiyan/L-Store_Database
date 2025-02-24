@@ -48,7 +48,7 @@ class Query:
     # Returns False if insert fails for whatever reason
     """
     def insert(self, *columns):
-        if (self.table.index.locate(self.table.key, columns[NUM_HIDDEN_COLUMNS + self.table.key])):
+        if (self.table.index.locate(self.table.key, columns[self.table.key])):
             return False
         
         # check for invalid number of columns
