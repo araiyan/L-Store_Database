@@ -186,7 +186,7 @@ class BufferPool:
 
         if (page_frame_num is None):
             if (self.available_frames_queue.empty() and not self.__replacement_policy()):
-                return None
+                raise MemoryError("Unable to allocate new frame")
 
             current_frame:Frame = self.__load_new_frame(page_disk_path)
         else:
