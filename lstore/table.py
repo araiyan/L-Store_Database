@@ -53,8 +53,11 @@ class Table:
         # initialize bufferpool in table, not DB
         self.bufferpool = BufferPool(self.table_path)
         self.page_ranges:List[PageRange] = []
-    
-        self.diallocation_rid_queue = queue.Queue()
+
+        # setup queues for both base and logical rids
+        self.deallocation_base_rid_queue = queue.Queue()
+        self.deallocation_logical_rid_queue = queue.Queue()
+
         self.merge_queue = queue.Queue()
         '''stores the base rid of a record to be merged'''
 
@@ -172,16 +175,35 @@ class Table:
         }
 
     def delete(self, rid):
-        '''Marks a record as deleted and makes its RID available for reallocation (diallocation_rid_queue)'''
+        '''Marks a record (base and tail) as deleted and makes its RID available for reallocation (diallocation_rid_queue)'''
 
         # check to ensure record exists
         if rid not in self.page_directory:
             return False
         
         page_range_idx, page_idx, page_slot = self.get_base_record_location(rid)
+        current_page_range = self.page_ranges[page_range_idx]
+
+        latest_logical_rid = current_page_range.read_tail_record_column(rid, INDIRECTION_COLUMN)
 
         # update value in base page indirection column to deleted
-        self.bufferpool.write_page_slot(page_range_idx, INDIRECTION_COLUMN, page_idx, page_slot, RECORD_DELETION_FLAG)
-        self.diallocation_rid_queue.put(rid)
+        current_page_range.bufferpool.write_page_slot(page_range_idx, INDIRECTION_COLUMN, page_idx, page_slot, RECORD_DELETION_FLAG)
+        self.deallocation_base_rid_queue.put(rid)
+
+        # traverse and mark all tail records as deleted
+        while latest_logical_rid >= MAX_RECORD_PER_PAGE_RANGE:
+            next_logical_rid = current_page_range.read_tail_record_column(latest_logical_rid, INDIRECTION_COLUMN)
+
+            # mark logical RID as deleted in tail pages
+            tail_page_idx, tail_page_slot = current_page_range.get_column_location(latest_logical_rid, RID_COLUMN)
+            current_page_range.bufferpool.write_page_slot(
+                page_range_idx, RID_COLUMN, tail_page_idx, tail_page_slot, RECORD_DELETION_FLAG
+            )
+
+            # add logical RID to deallocation queue for reuse
+            self.deallocation_logical_rid_queue.put(latest_logical_rid)
+
+            # move to next logical RID in the chain
+            latest_logical_rid = next_logical_rid
 
         return True
