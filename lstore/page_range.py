@@ -145,18 +145,10 @@ class PageRange:
     
     def deserialize(self, json_data):
         '''Loads a page from serialized data'''
+        self.logical_directory = {int(k): v for k, v in json_data["logical_directory"].items()}
         self.tail_page_index = json_data["tail_page_index"]
         self.logical_rid_index = json_data["logical_rid_index"]
         self.tps = json_data["tps"]
-        # Check if logical_directory exists and is not None
-        if json_data.get("logical_directory"):
-            # Deserialize logical_directory safely
-            self.logical_directory = {
-                int(k): v for k, v in json_data["logical_directory"].items()
-            }
-        else:
-            # Initialize as an empty dictionary if not present
-            self.logical_directory = {}
 
 
     def __hash__(self):

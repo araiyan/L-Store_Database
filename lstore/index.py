@@ -210,52 +210,22 @@ class Index:
                     del self.indices[i][value]
         return True
     
-    #added to test table serialize, basec testing is working fine
+    #added to test table serialize, implementation tbd
     def serialize(self):
         """Serializes the Index to a JSON-compatible dictionary"""
         print("start index des", self.indices)
-        serialized_indices = []
-        for index in self.indices:
-            if index is None:
-                serialized_indices.append(None)
-            else:
-                serialized_index = {}
-                for key, rids in index.items():
-                    serialized_index[key] = list(rids)  # Convert set of RIDs to list
-                serialized_indices.append(serialized_index)
-
-        print("emd index des")
         return {
-            "indices": serialized_indices,
-            "value_mapper": self.value_mapper,
-            "num_columns": self.num_columns,
-            "key": self.key
+            "indices": {},
+            "value_mapper": {},
+            "num_columns": 0,
+            "key": 0
         }
-        
-    #added to test table serialize, basec testing is working fine    
+     
+    #added to test table serialize, implementation tbd   
     def deserialize(self, data):
         """Deserializes the Index from JSON data"""
-        self.num_columns = int(data['num_columns'])
-        self.key = int(data['key'])
-
-        deserialized_indices = []
-        for index_data in data['indices']:
-            if index_data is None:
-                deserialized_indices.append(None)
-            else:
-                index = OOBTree()
-                # Convert keys back to integers
-                for key, rids in index_data.items():
-                    index[int(key)] = set(rids)  # Convert list of RIDs back to set
-                deserialized_indices.append(index)
-        self.indices = deserialized_indices
-
-        # Convert keys in value_mapper back to integers
-        deserialized_value_mapper = []
-        for vm in data['value_mapper']:
-            if vm is None:
-                deserialized_value_mapper.append(None)
-            else:
-                deserialized_vm = {int(k): v for k, v in vm.items()}
-                deserialized_value_mapper.append(deserialized_vm)
-        self.value_mapper = deserialized_value_mapper
+        self.indices = {}
+        self.value_mapper = {}
+        self.num_columns = 0
+        self.key = 0
+       
