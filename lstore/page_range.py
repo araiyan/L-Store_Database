@@ -100,7 +100,7 @@ class PageRange:
         '''Reads a column from the tail pages given a logical rid'''
         page_index, page_slot = self.get_column_location(logical_rid, column)
         column_value = self.bufferpool.read_page_slot(self.page_range_index, column, page_index, page_slot)
-        frame_num = self.bufferpool.get_page_frame_num(self.page_range_index, column, page_index, page_slot)
+        frame_num = self.bufferpool.get_page_frame_num(self.page_range_index, column, page_index)
         self.bufferpool.mark_frame_used(frame_num)
         return column_value
     

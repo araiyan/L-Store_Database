@@ -121,9 +121,7 @@ class Query:
 
 
             # DEBUG PRINTS
-            binary_str = "{0:05b}".format(base_schema)  # Convert to binary string with zero-padding
-            reversed_binary_str = binary_str[::-1]     # Reverse the binary digits so I can read schema more easily
-            print(f"In select: 0b{reversed_binary_str}")
+            print("Select, Base schema: ", f"{base_schema:05b}"[::-1])
 
 
             current_tail_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, base_page_index, base_page_slot)
@@ -150,20 +148,21 @@ class Query:
                         
                         while(temp_tail_rid != rid and current_version >= relative_version and not found_value):
                             
-                            # DEBUG PRINT
-                            print(temp_tail_rid)
+                            
 
 
-                            tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(temp_tail_rid, SCHEMA_ENCODING_COLUMN)
-                            tail_schema = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, tail_page_index, tail_slot)
-
-                            # DEBUG PRINT
-                            binary_str = "{0:05b}".format(tail_schema)  # Convert to binary string with zero-padding
-                            reversed_binary_str = binary_str[::-1]     # Reverse the binary digits so I can read schema more easily
-                            print(f"Tail Schema: 0b{reversed_binary_str}")
-
+                            tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
+                            
+                            # Read schema encoding for this tail record
+                            tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, SCHEMA_ENCODING_COLUMN)
 
                             if (tail_schema >> i) & 1 == 1:
+
+                                # DEBUG PRINT
+                                print(f"Current tail RID: {current_tail_rid}")
+                                print("Select, tail schema: ", f"{tail_schema:05b}"[::-1])
+
+                                print(f"In column {i}")
                                 record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, tail_page_index, tail_slot)
                                 found_value = True
                                 break
@@ -210,32 +209,28 @@ class Query:
 
         page_range_index, page_index, page_slot = self.table.get_base_record_location(rid_location[0])
         prev_tail_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
-
         base_schema = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, page_index,page_slot)
+        
         updated_base_schema = base_schema | schema_encoding
 
         new_columns[INDIRECTION_COLUMN] = prev_tail_rid
         new_columns[SCHEMA_ENCODING_COLUMN] = schema_encoding
         new_columns[TIMESTAMP_COLUMN] = int(time())
 
-        new_record = Record(rid = -1, key = primary_key, columns = new_columns)
-        self.table.assign_rid_to_record(new_record)
+        new_record = Record(rid = self.table.page_ranges[page_range_index].assign_logical_rid(), key = primary_key, columns = new_columns)
 
-        binary_str = "{0:05b}".format(schema_encoding)  # Convert to binary string with zero-padding
-        reversed_binary_str = binary_str[::-1]     # Reverse the binary digits so I can read schema more easily
-        print(f"In update, record schema encoding for record {new_record.rid}: 0b{reversed_binary_str}")
-        
-        
         self.table.page_ranges[page_range_index].write_tail_record(new_record.rid, *new_columns)
+        
         self.table.bufferpool.write_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot, new_record.rid)
-        self.table.bufferpool.write_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, page_index, page_slot, updated_base_schema)
+        self.table.bufferpool.write_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN,page_index, page_slot, updated_base_schema)
 
-        # DEBUG PRINT
-        tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(new_record.rid, SCHEMA_ENCODING_COLUMN)
-        tail_schema = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, tail_page_index, tail_slot)
-        binary_str = "{0:05b}".format(tail_schema)  # Convert to binary string with zero-padding
-        reversed_binary_str = binary_str[::-1]     # Reverse the binary digits so I can read schema more easily
-        print(f"In update, tail schema for RID {new_record.rid}: 0b{reversed_binary_str}")
+
+
+        schema = self.table.page_ranges[page_range_index].read_tail_record_column(new_record.rid, SCHEMA_ENCODING_COLUMN)
+        print("Schema from page ranges: ", f"{schema:05b}"[::-1])
+
+        prevRID = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
+        print(f"Indirection of base points to: {prevRID}")    
 
         # Update successful
         # print("Update Successful\n")
@@ -365,6 +360,7 @@ class Query:
     
     
     def __grabConsolidatedStack(self, base_rid):
+        
         '''Given a base rid returns the consolidated page's rid and timestamp in a stack and the indireciton rid to latest tail page'''
         page_range_index, page_index, page_slot = self.table.get_base_record_location(base_rid)
         
