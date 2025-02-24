@@ -35,118 +35,55 @@ class TestIndexMethods(unittest.TestCase):
         all_keys = []
         for i in range(0, number_of_records):
             key = 92106429 + i
+
             records[key] = [key, randint(0, 20), randint(0, 20), randint(0, 20), randint(0, 20)]
+
+            if key == 92106430:
+                print(records[key])
+
             all_keys.append(key)
             query.insert(*records[key])
         keys = sorted(list(records.keys()))
         print("Insert finished")
 
+        #create index on column 1
         grades_table.index.create_index(1)
-        print(dict(grades_table.index.indices[1]))
+
+        #locate specific record and get rid
+        rid  = query.table.index.locate(query.table.key, 92106430)
+        print(rid)
+        #rid = 1, column value at column 1 = 19
+
+        #print what index look like before update
+        print(dict(grades_table.index.indices[1][1]))
+        print(dict(grades_table.index.indices[1][19]))
+
+        #update column value from 19 to 1 and check if index is updated
+        query.table.index.update_all_indices(92106430, [0,0,0,0,0, 0, None, 1, None,None,None])
+        print(dict(grades_table.index.indices[1][1]))
+        print(dict(grades_table.index.indices[1][19]))
+
+        #update to unique value
+        query.table.index.update_all_indices(92106430, [0,0,0,0,0, 0, None, 123456789, None,None,None])
+        print(dict(grades_table.index.indices[1][123456789]))
+        print(dict(grades_table.index.indices[1][1]))
+        
+        #test delete
+        #query.table.index.update_all_indices(92106430, [0,0,0,0,0, 0, None, 1, None,None,None])
+        print(dict(grades_table.index.indices[1][123456789]))
+        query.table.index.delete_from_all_indices(92106430)
+
+        # throws error bc its already deleted
+        #print(dict(grades_table.index.indices[1][123456789]))
         
 
-        grades_table.index.serialize_all_indices()
-        grades_table.index.deserialize_all_indices()
+        #grades_table.index.serialize_all_indices()
+        #grades_table.index.deserialize_all_indices()
 
         #for item in all_keys:
         #    print(grades_table.index.locate(grades_table.key, item))
         #    print(grades_table.index.value_mapper[item])
             
-        """
-        # Student id, Key, Age, Grade
-        record1 = Record(0, grades_table.key, [91900, 101, 20, 90])
-        record2 = Record(1, grades_table.key, [91901, 102, 21, 95])
-        record3 = Record(2, grades_table.key, [91902, 103, 18, 90])
-        record4 = Record(3, grades_table.key, [None, None, 19, 83])
-        record5 = Record(4, grades_table.key, [None, None, 20, None])
-        record6 = Record(5, grades_table.key, [91903, 104, 19, 99])
-
-
-        # Should return None
-        key = index.locate(grades_table.key, 101)
-        print(f"Key 101 RID: {key}")
-
-        r1 = [0, record1.rid,0,0,record1.columns[0], record1.columns[1], record1.columns[2], record1.columns[3]]
-        r2 = [0, record2.rid,0,0,record2.columns[0], record2.columns[1], record2.columns[2], record2.columns[3]]
-        r3 = [0, record3.rid,0,0,record3.columns[0], record3.columns[1], record3.columns[2], record3.columns[3]]
-
-        index.insert_in_all_indices(r1)
-        index.insert_in_all_indices(r2)
-        index.insert_in_all_indices(r3)
-
-        all_rid = index.grab_all()
-        print(f"all_rid: {all_rid}")
-
-        rid = index.locate(grades_table.key, 101)
-        print(f"Key 101 RID: {rid}")
-        self.assertEqual(rid[0], record1.rid)
-
-        rid = index.locate_range(102, 103, grades_table.key)
-        print(f"Key 102-103 RID: {rid}")
-        self.assertEqual(rid, [record2.rid, record3.rid])
-
-        # Should return None since key 200 doesn't exist
-        rid = index.locate(grades_table.key, 200)
-        print(f"Key 200 RID: {rid}")
-
-        r4 = [0,record4.rid,0,0, record4.columns[0], record4.columns[1], record4.columns[2], record4.columns[3]]
-        index.update_all_indices(103, r4)
-
-        r5 = [0,record5.rid,0,0, record5.columns[0], record5.columns[1], record5.columns[2], record5.columns[3]]
-        index.update_all_indices(103, r5)
-
-        index.create_index(3, grades_table.key)
-        rid_of_grades = index.locate(3,90)
-        print(f"rid of students with grade 90: {rid_of_grades}")
-
-        rid_of_grades = index.locate_range(50,92,3)
-        print(f"rid of students with grade 50-92: {rid_of_grades}")
-        
-        print("get stuff from value mapper")
-        grades = index.get(grades_table.key,3,101)
-        print(f"grades of students with primary key 101 : {grades}")
-
-        grades = index.get_range(grades_table.key,3,101,103)
-        print(f"grades of students with primary key 101-103 : {grades}")
-
-        print("create and get stuff from secondary index")
-        index_primary_key_to_grade = index.create_index(grades_table.key,3)
-        #print(dict(index_primary_key_to_grade))
-
-        grades = index.get(grades_table.key,3,101)
-        print(f"grades of students with primary key 101 : {grades}")
-
-        grades = index.get_range(grades_table.key,3,101,103)
-        print(f"grades of students with primary key 101-103 : {grades}")
-
-
-        index_age_to_grade = index.create_index(2,3)
-        print(dict(index_age_to_grade))
-
-        grades = index.get(2,3,20)
-        print(f"grades of students age: 20 : {grades}")
-
-        grades = index.get_range(2,3,20,50)
-        print(f"grades of students age: 20-50 : {grades}")
-
-        #get something not in secondary index
-        age = index.get(3, 2, 83)
-        print(f"age of student with grade 83 : {age}")
-
-        print(f"secondary index age to grade: {dict(index_age_to_grade)}")
-
-        column = index.delete_from_all_indices(record2.columns[grades_table.key])
-        print(f"deleted column: {column} from all index")
-        print(f"secondary index age to grade: {dict(index_age_to_grade)}")
-
-        column = index.delete_from_all_indices(record3.columns[grades_table.key])
-        print(f"deleted column: {column} from all index")
-        print(f"secondary index age to grade: {dict(index_age_to_grade)}")
-        print(dict(index.value_mapper))
-
-        grades = index.get(2,3,20)
-        print(f"grades of students age: 20 : {grades}")
-        """
 
 
 unittest.main()

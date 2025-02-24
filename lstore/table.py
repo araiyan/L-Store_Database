@@ -163,6 +163,7 @@ class Table:
             "num_columns": self.num_columns,
             "key_index": self.key,
             "page_directory": self.page_directory,
-            "rid_index": self.rid_index
+            "rid_index": self.rid_index,
+            "index:": self.index.serialize()
         }
 

@@ -1,6 +1,7 @@
 """
 A data strucutre holding indices for various columns of a table. Key column should be indexd by default, other columns can be indexed through this object. Indices are usually B-Trees, but other data structures can be used as well.
 """
+import base64
 import re
 from lstore.config import *
 from BTrees.OOBTree import OOBTree
@@ -21,23 +22,21 @@ class Index:
 
         self.num_columns = table.num_columns
         self.key = table.key
-        #self.bufferpool = table.bufferpool
-        #self.page_ranges = table.page_ranges
         self.table = table
 
         self.create_index(self.key)
 
-        self.index_directory = os.path.join(table.table_path, "Index")
-        self.path_to_value_mapper = os.path.join(self.index_directory, "Value_Mapper.pkl")
+        #self.index_directory = os.path.join(table.table_path, "Index")
+        #self.path_to_value_mapper = os.path.join(self.index_directory, "Value_Mapper.pkl")
 
-        if not os.path.exists(self.index_directory):
-            os.makedirs(self.index_directory)
+        #if not os.path.exists(self.index_directory):
+        #    os.makedirs(self.index_directory)
 
         #primary index and value mapper are recreated upon reopening db
 
-        self.deserialize_all_indices()
+        #self.deserialize()
 
-        self.__generate_primary_index()
+        #self.__generate_primary_index()
 
 
 
@@ -65,6 +64,7 @@ class Index:
     # index will have key and column mapped as {key_column_value1: [value_column_value1]}
     # or {key_column_value1: [value_column_value1, value_column_value2...]} if more than one value maps to the same key
     # create secondary index through primary index and value mapper
+    """
     """
     def create_index(self, column_number):
         #deserialize value_mapper if lost
@@ -102,19 +102,19 @@ class Index:
             self.indices[column_number] = OOBTree()
 
             # go through value mapper to create new index
-            all_base_rids = self.table.grab_all_base_rid()
+            all_base_rids = self.grab_all()
 
             #read through bufferpool to get latest tail record
             for rid in all_base_rids:
 
                 page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
                 indir_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
-                
-                # check for consolidated page and/or tail page
-                if indir_rid != rid:
-                    page_index, page_slot = self.table.page_ranges[page_range_index].get_column_location(indir_rid, column_number)
- 
-                column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number, page_index, page_slot)
+
+                if indir_rid > MAX_RECORD_PER_PAGE_RANGE: #is updated and have tail page
+                    column_value = self.table.read_tail_record_column(self, indir_rid, column_number + NUM_HIDDEN_COLUMNS)
+
+                else: #not updated/does not have tail page
+                    column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index, page_slot)
 
                 #insert {primary_index: {rid: True}} into primary index BTree
                 self.insert_to_index(column_number, column_value, rid)
@@ -122,7 +122,7 @@ class Index:
             return True
         else:
             return False
-    """
+
 
     """
     # optional: Drop index of specific column
@@ -139,9 +139,9 @@ class Index:
             self.indices[column_number] = None
 
             #delete file 
-            path = os.path.join(self.index_directory, f"index_{column_number}.pkl")
-            if os.path.isfile(path):
-                os.remove(path)
+            #path = os.path.join(self.index_directory, f"index_{column_number}.pkl")
+            #if os.path.isfile(path):
+            #    os.remove(path)
 
             return True
         # if the index trying to drop doesn't exist in the dict of secondary indices
@@ -207,20 +207,19 @@ class Index:
             return False
         
         #delete from primary index
-        self.delete_from_index(self.key, primary_key)
+        #self.delete_from_index(self.key, primary_key)
 
         # if we have secondary index, delete from those too
         for i in range(self.num_columns):
 
-            if self.indices[i] != None:
+            if self.indices[i] != None and i != self.key:
 
                 key = self.value_mapper[primary_key][i]
-                rid = self.indices[self.key][primary_key].keys()[0]
+                rid = list(self.indices[self.key][primary_key].keys())[0]
 
                 del self.indices[i][key][rid]
 
                 if self.indices[i][key] == {}:
-                    
                     del self.indices[i][key]
 
         #delete from value mapper
@@ -243,18 +242,24 @@ class Index:
             if columns[NUM_HIDDEN_COLUMNS + i] != None and self.indices[i] != None:
             
 
-                    key = self.value_mapper[primary_key][i]
-                    rid = self.indices[self.key][primary_key].keys()[0]
+                key = self.value_mapper[primary_key][i]
+                rid = list(self.indices[self.key][primary_key].keys())[0]
+                #column_value = self.value_mapper[primary_key][]
 
-                    #if changed value is in key column, transfer to new mapping to new key and delete old key
-                    if self.indices[i].get(columns[i + NUM_HIDDEN_COLUMNS]):
+                #if changed value is in key column, transfer to new mapping to new key and delete old key
+                if self.indices[i].get(columns[i + NUM_HIDDEN_COLUMNS]):
 
-                        self.insert_to_index(i, columns[i + NUM_HIDDEN_COLUMNS, rid])
+                    self.insert_to_index(i, columns[i + NUM_HIDDEN_COLUMNS], rid)
+                    del self.indices[i][key][rid]
 
-                    else:
-                        self.indices[i][columns[i + NUM_HIDDEN_COLUMNS]] = self.indices[i][key]
-                        self.insert_to_index(i, columns[i + NUM_HIDDEN_COLUMNS, rid])
+                else:
+                    #self.indices[i][columns[i + NUM_HIDDEN_COLUMNS]] = self.indices[i][key]
+                    self.insert_to_index(i, columns[i + NUM_HIDDEN_COLUMNS], rid)
+                    del self.indices[i][key][rid]
+                    if self.indices[i][key] == {}:
+                    
                         del self.indices[i][key]
+
         
 
             self.value_mapper[primary_key][i] = columns[i + NUM_HIDDEN_COLUMNS]
@@ -330,47 +335,33 @@ class Index:
             #insert {primary_index: {rid: True}} into primary index BTree
             self.insert_to_index(self.key, primary_key, rid)
     
-    # use this when open db
-    def deserialize(self, path, column_number):
-        with open(path, 'rb') as file:
-            self.indices[column_number] = pickle.load(file)
+    # call "index:": self.index.serialize() from table
+    # pickle every index BTree and then store them in base64
+    def serialize(self):
 
-
-    #use this when close db
-    def serialize(self, path, data):
-        with open(path, 'wb') as file:
-            pickle.dump(data, file)
-
-
-    def serialize_all_indices(self):
-
-        if not os.path.exists(self.index_directory):
-            os.makedirs(self.index_directory)
+        all_serialized_data = {}
 
         for i in range(self.num_columns):
             if self.indices[i] != None:
-                path = os.path.join(self.index_directory, f"index_{i}.pkl")
-                self.serialize(path, self.indices[i])
+                pickled_index = pickle.dumps(self.indices[i])
+                encoded_pickled_index = base64.b64encode(pickled_index).decode('utf-8')
+                all_serialized_data[f"index[{i}]"] = encoded_pickled_index
         
-        self.serialize(self.path_to_value_mapper, self.value_mapper)
+        pickled_value_mapper= pickle.dumps(self.value_mapper)
+        encoded_pickled_value_mapper = base64.b64encode(pickled_value_mapper).decode('utf-8')
+        all_serialized_data["value_mapper"] = encoded_pickled_value_mapper
+
+        return all_serialized_data
     
+    # call index.deserialize(json_data["Index"]) from table
+    def deserialize(self, data):
 
-    def deserialize_all_indices(self):
+        if "value_mapper" in data:
+            decoded_value_mapper = base64.b64decode(data["value_mapper"])
+            self.value_mapper = pickle.loads(decoded_value_mapper)
 
-        if os.path.exists(self.index_directory):
-
-            index_file = r'index_(\d+)\.pkl'
-            all_saved_index = os.listdir(self.index_directory)
-
-            for index in all_saved_index:
-                path = os.path.join(self.index_directory, index)
-                is_index = re.match(index_file, index)
-                if is_index:
-                    column_number = int(is_index.group(1))
-
-                    if os.path.exists(path) and os.path.getsize(path) != 0:
-                        self.deserialize(path, column_number)
-                else:
-                    if os.path.exists(self.path_to_value_mapper) and os.path.getsize(self.path_to_value_mapper) != 0:
-                        with open(path, 'rb') as file:
-                            self.value_mapper = pickle.load(file)
+        for i in range(self.num_columns):
+            index_column_number = f"index[{i}]"
+            if index_column_number in data:
+                decoded_index = base64.b64decode(data[index_column_number])
+                self.indices[i] = pickle.loads(decoded_index)
