@@ -83,7 +83,7 @@ class Table:
         page_range_index, page_index, page_slot = self.get_base_record_location(record.rid)
 
         if (page_range_index >= len(self.page_ranges)):
-            self.page_ranges.append(PageRange(page_range_index, self.num_columns, self.bufferpool))
+            self.page_ranges.append(PageRange(page_range_index, self.num_columns, self.bufferpool, self.merge_queue))
         
         current_page_range:PageRange = self.page_ranges[page_range_index]
 
