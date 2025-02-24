@@ -39,6 +39,8 @@ class Index:
     # optional: Create index on specific column
     """
     def create_index(self, column_number):
+        
+        # Initialize indices as a list of empty dictionaries for each column
         if self.indices[column_number] is None:
             self.indices[column_number] = OOBTree()
             return self.indices[column_number]
@@ -183,6 +185,22 @@ class Index:
                 if i == self.key:
                     value = primary_key
                 else:
+                    value = self.search_value(primary_key, temp_rid, i + NUM_HIDDEN_COLUMNS)
+
+
+    """
+    # Remove element associated with rid : primary key from all indices
+    """
+    def delete_from_all_indices(self, primary_key):
+        rid = self.indices[self.key][primary_key]
+        if rid == None:
+            return False
+        for i in range(0, self.num_columns):
+            if self.indices[i] != None:
+                # look for value matched to rid
+                if i == self.key:
+                    value = primary_key
+                else:
                     #value = self.search_value(primary_key, temp_rid, i + NUM_HIDDEN_COLUMNS)
                     value = self.search_value(self.indices[i],rid)
                     
@@ -191,3 +209,53 @@ class Index:
                 if self.indices[i][value] == set():
                     del self.indices[i][value]
         return True
+    
+    #added to test table serialize, basec testing is working fine
+    def serialize(self):
+        """Serializes the Index to a JSON-compatible dictionary"""
+        print("start index des", self.indices)
+        serialized_indices = []
+        for index in self.indices:
+            if index is None:
+                serialized_indices.append(None)
+            else:
+                serialized_index = {}
+                for key, rids in index.items():
+                    serialized_index[key] = list(rids)  # Convert set of RIDs to list
+                serialized_indices.append(serialized_index)
+
+        print("emd index des")
+        return {
+            "indices": serialized_indices,
+            "value_mapper": self.value_mapper,
+            "num_columns": self.num_columns,
+            "key": self.key
+        }
+        
+    #added to test table serialize, basec testing is working fine    
+    def deserialize(self, data):
+        """Deserializes the Index from JSON data"""
+        self.num_columns = int(data['num_columns'])
+        self.key = int(data['key'])
+
+        deserialized_indices = []
+        for index_data in data['indices']:
+            if index_data is None:
+                deserialized_indices.append(None)
+            else:
+                index = OOBTree()
+                # Convert keys back to integers
+                for key, rids in index_data.items():
+                    index[int(key)] = set(rids)  # Convert list of RIDs back to set
+                deserialized_indices.append(index)
+        self.indices = deserialized_indices
+
+        # Convert keys in value_mapper back to integers
+        deserialized_value_mapper = []
+        for vm in data['value_mapper']:
+            if vm is None:
+                deserialized_value_mapper.append(None)
+            else:
+                deserialized_vm = {int(k): v for k, v in vm.items()}
+                deserialized_value_mapper.append(deserialized_vm)
+        self.value_mapper = deserialized_value_mapper

@@ -3,6 +3,7 @@ from lstore.page_range import PageRange
 from time import time
 from lstore.config import *
 from lstore.bufferpool import BufferPool
+import threading
 import json
 import os
 import json
@@ -26,7 +27,8 @@ class Table:
     """
     :param name: string         #Table name
     :param num_columns: int     #Number of Columns: all columns are integer
-    :param key: int             #Index of table key in columns
+    :param key: int             #Index of table(primary) key in column
+    :db_path: string            #Path to the database directory where the table's data will be stored.
     """
     def __init__(self, name, num_columns, key, db_path):
         if (key < 0 or key >= num_columns):
@@ -51,13 +53,9 @@ class Table:
         self.index = Index(self)
 
         # initialize bufferpool in table, not DB
-        self.bufferpool = Bufferpool(self.table_path)
-        #self.preload_pages()
-        
-        self.base_pages = {}
-        self.tail_pages = {}
-        self.tail_pages_prev_merge = [0] * self.num_columns
-        '''Keeps track of the number of tail pages that have been merged'''
+        self.bufferpool = BufferPool(self.table_path)
+        self.page_ranges:List[PageRange] = []
+    
 
         self.diallocation_rid_queue = queue.Queue()
 
@@ -272,24 +270,67 @@ class Table:
             "table_name": self.name,
             "num_columns": self.num_columns,
             "key_index": self.key,
-            "page_directory": self.page_directory,
-            "rid_index": self.rid_index
+            "page_directory": self.serialize_page_directory(),
+            "rid_index": self.rid_index,
+            "index": self.index.serialize(),
+            "page_ranges": [pr.serialize() for pr in self.page_ranges]
         }
+        
+        
+    def serialize_page_directory(self):
+        """Serializes the Page Directory for JSON compatibility"""
+        serialized_directory = {}
+        for rid, location in self.page_directory.items():
+            # Location is (Page Range ID, Page Index, Slot Index)
+            serialized_directory[rid] = {
+                "page_range_id": location[0],
+                "page_index": location[1],
+                "slot_index": location[2]
+            }
+        return serialized_directory
 
-    def save_to_json(self, file_path):
-        """Saves the serialized table metadata to a JSON file"""
-        serialized_data = self.serialize()
-        with open(file_path, 'w') as json_file:
-            json.dump(serialized_data, json_file, indent=4)
-        print(f"Table metadata saved to {file_path}")
+    def deserialize(self, data):
+        """Restores the Table state from a JSON-compatible dictionary"""
+        # Restore basic table metadata
+        self.name = data['table_name']
+        self.num_columns = data['num_columns']
+        self.key = data['key_index']
+        self.rid_index = data['rid_index']
+        
+        # Recreate Page Directory
+        self.page_directory = self.deserialize_page_directory(data['page_directory'])
 
-    def load_from_json(self, file_path):
-        """Loads table metadata from a JSON file and restores the table state"""
-        with open(file_path, 'r') as json_file:
-            data = json.load(json_file)
-            self.name = data['table_name']
-            self.num_columns = data['num_columns']
-            self.key = data['key_index']
-            self.page_directory = data['page_directory']
-            self.rid_index = data['rid_index']
-        print(f"Table metadata loaded from {file_path}")
+        # Recreate Index
+        self.index.deserialize(data['index'])
+
+        # Recreate Page Ranges with required arguments
+        self.page_ranges = []
+        for idx, pr_data in enumerate(data['page_ranges']):
+        # Fix: Pass required arguments for PageRange
+            page_range = PageRange(
+                page_range_index=idx,          # Page Range Index
+                num_columns=self.num_columns,  # Number of Columns
+                bufferpool=self.bufferpool     # Buffer Pool
+            )
+            page_range.deserialize(pr_data)
+            self.page_ranges.append(page_range)
+            
+
+    def deserialize_page_directory(self, serialized_directory):
+        """Deserializes the Page Directory from JSON-compatible format"""
+        deserialized_directory = {}
+
+        for rid_str, location in serialized_directory.items():
+            # Convert RID key from string to integer
+            rid = int(rid_str)
+
+            # Reconstruct the location tuple: (Page Range ID, Page Index, Slot Index)
+            deserialized_directory[rid] = (
+                int(location['page_range_id']),  # Convert to int
+                int(location['page_index']),     # Convert to int
+                int(location['slot_index'])      # Convert to int
+            )
+
+        return deserialized_directory
+        
+        
