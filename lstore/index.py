@@ -210,22 +210,4 @@ class Index:
                     del self.indices[i][value]
         return True
     
-    #added to test table serialize, implementation tbd
-    def serialize(self):
-        """Serializes the Index to a JSON-compatible dictionary"""
-        print("start index des", self.indices)
-        return {
-            "indices": {},
-            "value_mapper": {},
-            "num_columns": 0,
-            "key": 0
-        }
-     
-    #added to test table serialize, implementation tbd   
-    def deserialize(self, data):
-        """Deserializes the Index from JSON data"""
-        self.indices = {}
-        self.value_mapper = {}
-        self.num_columns = 0
-        self.key = 0
-       
+   
