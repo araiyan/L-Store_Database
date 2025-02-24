@@ -48,7 +48,7 @@ class Query:
     # Returns False if insert fails for whatever reason
     """
     def insert(self, *columns):
-        if (self.table.index.locate(self.table.key, columns[NUM_HIDDEN_COLUMNS + self.table.key])):
+        if (self.table.index.locate(self.table.key, columns[self.table.key])):
             return False
         
         # check for invalid number of columns
@@ -61,6 +61,7 @@ class Query:
         hidden_columns = [None] * NUM_HIDDEN_COLUMNS
         hidden_columns[INDIRECTION_COLUMN] = record.rid
         hidden_columns[RID_COLUMN] = record.rid
+        hidden_columns[UPDATE_TIMESTAMP_COLUMN] = RECORD_NONE_VALUE
         hidden_columns[TIMESTAMP_COLUMN] = int(time())
         hidden_columns[SCHEMA_ENCODING_COLUMN] = 0
         hidden_columns[BASE_PAGE_ID_COLUMN] = record.rid

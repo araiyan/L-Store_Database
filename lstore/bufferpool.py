@@ -137,6 +137,7 @@ class BufferPool:
                 return None
             
             current_frame:Frame = self.__load_new_frame(page_disk_path)
+            current_frame.decrement_pin()
             return current_frame.get_page_capacity()
         
         current_frame:Frame = self.frames[page_frame_num]
@@ -186,7 +187,9 @@ class BufferPool:
 
         if (page_frame_num is None):
             if (self.available_frames_queue.empty() and not self.__replacement_policy()):
-                return None
+                for i in range(MAX_NUM_FRAME):
+                    print(f"Frame {i} has pin {self.frames[i].pin}")
+                raise MemoryError("Unable to allocate new frame")
 
             current_frame:Frame = self.__load_new_frame(page_disk_path)
         else:

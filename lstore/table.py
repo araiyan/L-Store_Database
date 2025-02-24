@@ -83,11 +83,11 @@ class Table:
         page_range_index, page_index, page_slot = self.get_base_record_location(record.rid)
 
         if (page_range_index >= len(self.page_ranges)):
-            self.page_ranges.append(PageRange(page_range_index, self.num_columns, self.bufferpool))
+            self.page_ranges.append(PageRange(page_range_index, self.num_columns, self.bufferpool, self.merge_queue))
         
         current_page_range:PageRange = self.page_ranges[page_range_index]
 
-        current_page_range.write_base_record(page_index, page_slot, *record.columns)   
+        current_page_range.write_base_record(page_index, page_slot, record.columns)   
     
     def __merge(self):
         print("Merge is happening")
@@ -134,7 +134,7 @@ class Table:
                 
 
                 base_record_columns[UPDATE_TIMESTAMP_COLUMN] = time()
-                current_page_range.write_base_record(page_index, page_slot, *base_record_columns)
+                current_page_range.write_base_record(page_index, page_slot, base_record_columns)
             
 
             self.merge_queue.task_done()

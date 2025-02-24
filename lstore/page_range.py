@@ -34,8 +34,8 @@ class PageRange:
 
         self.page_range_index = page_range_index
 
-    def write_base_record(self, page_index, page_slot, *columns) -> bool:
-        columns[INDIRECTION_COLUMN] = self.__normalize_rid(column[RID_COLUMN])
+    def write_base_record(self, page_index, page_slot, columns) -> bool:
+        columns[INDIRECTION_COLUMN] = self.__normalize_rid(columns[RID_COLUMN])
         for (i, column) in enumerate(columns):
             self.bufferpool.write_page_slot(self.page_range_index, i, page_index, page_slot, column)
         return True
@@ -49,7 +49,7 @@ class PageRange:
 
         # mark the frame used after reading
         for i in range(self.total_num_columns):
-            frame_num = self.bufferpool.get_page_frame_num(self.page_range_index, i, page_index, page_slot)
+            frame_num = self.bufferpool.get_page_frame_num(self.page_range_index, i, page_index)
             self.bufferpool.mark_frame_used(frame_num)
 
         return base_record_columns
@@ -61,6 +61,8 @@ class PageRange:
             last_logical_rid = logical_rid
             page_index, page_slot = self.get_column_location(logical_rid, INDIRECTION_COLUMN)
             logical_rid = self.bufferpool.read_page_slot(self.page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
+            frame_num = self.bufferpool.get_page_frame_num(self.page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
+            self.bufferpool.mark_frame_used(frame_num)
 
         return last_logical_rid
 
@@ -98,6 +100,8 @@ class PageRange:
         '''Reads a column from the tail pages given a logical rid'''
         page_index, page_slot = self.get_column_location(logical_rid, column)
         column_value = self.bufferpool.read_page_slot(self.page_range_index, column, page_index, page_slot)
+        frame_num = self.bufferpool.get_page_frame_num(self.page_range_index, column, page_index, page_slot)
+        self.bufferpool.mark_frame_used(frame_num)
         return column_value
     
     # Only use this function for API calls
