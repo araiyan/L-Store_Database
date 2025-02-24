@@ -39,8 +39,6 @@ class Index:
     # optional: Create index on specific column
     """
     def create_index(self, column_number):
-        
-        # Initialize indices as a list of empty dictionaries for each column
         if self.indices[column_number] is None:
             self.indices[column_number] = OOBTree()
             return self.indices[column_number]
@@ -185,22 +183,6 @@ class Index:
                 if i == self.key:
                     value = primary_key
                 else:
-                    value = self.search_value(primary_key, temp_rid, i + NUM_HIDDEN_COLUMNS)
-
-
-    """
-    # Remove element associated with rid : primary key from all indices
-    """
-    def delete_from_all_indices(self, primary_key):
-        rid = self.indices[self.key][primary_key]
-        if rid == None:
-            return False
-        for i in range(0, self.num_columns):
-            if self.indices[i] != None:
-                # look for value matched to rid
-                if i == self.key:
-                    value = primary_key
-                else:
                     #value = self.search_value(primary_key, temp_rid, i + NUM_HIDDEN_COLUMNS)
                     value = self.search_value(self.indices[i],rid)
                     
@@ -209,5 +191,3 @@ class Index:
                 if self.indices[i][value] == set():
                     del self.indices[i][value]
         return True
-    
-   

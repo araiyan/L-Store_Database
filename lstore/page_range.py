@@ -154,7 +154,6 @@ class PageRange:
         self.logical_rid_index = json_data["logical_rid_index"]
         self.tps = json_data["tps"]
 
-
     def __hash__(self):
         return self.page_range_index
     
