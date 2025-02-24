@@ -3,21 +3,28 @@ import json
 from lstore.table import Table
 from lstore.index import Index
 from BTrees.OOBTree import OOBTree
+import atexit
+import shutil
 
 class Database():
 
     def __init__(self, path="ECS165"):
         self.tables:dict = {}
         self.path = path
+        self.no_path_set = True
+        atexit.register(self.__remove_db_path)
         
 
     def open(self, path):
         """Loads database from disk and restores tables, indexes, and pages"""
         self.path = path
+        self.no_path_set = False
 
         # create new path if database path doesn't exist
         if not os.path.exists(path):
             os.makedirs(path)
+
+        atexit.unregister(self.__remove_db_path)
         
         # grab table metadata
         # this logic will be skipped if opening for the first time -- close() aggregates all table metadata into tables.json path
@@ -45,7 +52,7 @@ class Database():
 
     def close(self):
         """Flushes dirty pages back to disk, saves table metadata and shuts down"""
-        if not self.path:
+        if self.no_path_set:
             raise ValueError("Database path is not set. Use open() before closing.")
         
         tables_metadata = {}
@@ -103,3 +110,8 @@ class Database():
             raise NameError(f"Error getting Table! Following table does not exist: {name}")
         
         return self.tables[name]
+    
+    def __remove_db_path(self):
+            if os.path.exists(self.path):
+                shutil.rmtree(self.path)
+
