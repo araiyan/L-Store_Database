@@ -3,11 +3,10 @@ from lstore.page_range import PageRange, MergeRequest
 from time import time
 from lstore.config import *
 from lstore.bufferpool import BufferPool
-
+import json
 import os
 import threading
 import queue
-
 from typing import List
 
 class Record:
@@ -26,7 +25,8 @@ class Table:
     """
     :param name: string         #Table name
     :param num_columns: int     #Number of Columns: all columns are integer
-    :param key: int             #Index of table key in columns
+    :param key: int             #Index of table(primary) key in column
+    :db_path: string            #Path to the database directory where the table's data will be stored.
     """
     def __init__(self, name, num_columns, key, db_path):
         if (key < 0 or key >= num_columns):
@@ -168,42 +168,10 @@ class Table:
     def serialize(self):
         """Returns table metadata as a JSON-compatible dictionary"""
         return {
+            "table_name": self.name,
             "num_columns": self.num_columns,
             "key_index": self.key,
             "page_directory": self.page_directory,
             "rid_index": self.rid_index
         }
 
-    def delete(self, rid):
-        '''Marks a record (base and tail) as deleted and makes its RID available for reallocation (diallocation_rid_queue)'''
-
-        # check to ensure record exists
-        if rid not in self.page_directory:
-            return False
-        
-        page_range_idx, page_idx, page_slot = self.get_base_record_location(rid)
-        current_page_range = self.page_ranges[page_range_idx]
-
-        latest_logical_rid = current_page_range.read_tail_record_column(rid, INDIRECTION_COLUMN)
-
-        # update value in base page indirection column to deleted
-        current_page_range.bufferpool.write_page_slot(page_range_idx, INDIRECTION_COLUMN, page_idx, page_slot, RECORD_DELETION_FLAG)
-        self.deallocation_base_rid_queue.put(rid)
-
-        # traverse and mark all tail records as deleted
-        while latest_logical_rid >= MAX_RECORD_PER_PAGE_RANGE:
-            next_logical_rid = current_page_range.read_tail_record_column(latest_logical_rid, INDIRECTION_COLUMN)
-
-            # mark logical RID as deleted in tail pages
-            tail_page_idx, tail_page_slot = current_page_range.get_column_location(latest_logical_rid, RID_COLUMN)
-            current_page_range.bufferpool.write_page_slot(
-                page_range_idx, RID_COLUMN, tail_page_idx, tail_page_slot, RECORD_DELETION_FLAG
-            )
-
-            # add logical RID to deallocation queue for reuse
-            self.deallocation_logical_rid_queue.put(latest_logical_rid)
-
-            # move to next logical RID in the chain
-            latest_logical_rid = next_logical_rid
-
-        return True
