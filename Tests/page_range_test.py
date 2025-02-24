@@ -133,7 +133,7 @@ class TestPageRange(unittest.TestCase):
         with open(f"{self.table.table_path}/page_range_3.bin", "w", encoding="utf-8") as file:
             json.dump(page_range.serialize(), file)
 
-        new_page_range = PageRange(3, self.num_columns, self.bufferpool)
+        new_page_range = PageRange(3, self.num_columns, self.bufferpool, self.merge_queue)
         with open(f"{self.table.table_path}/page_range_3.bin", "r", encoding="utf-8") as file:
             page_range_data = json.load(file)
             new_page_range.deserialize(page_range_data)
