@@ -61,6 +61,11 @@ class Table:
         # The table should handle assigning RIDs
         self.rid_index = 0
 
+        # Start the merge thread
+        # Note: This thread will stop running when the main program terminates
+        self.merge_thread = threading.Thread(target=self.__merge, daemon=True)
+        self.merge_thread.start()
+
     def assign_rid_to_record(self, record: Record):
         '''Use this function to assign a record's RID'''
         with self.page_directory_lock:
