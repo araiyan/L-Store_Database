@@ -151,12 +151,10 @@ class Query:
                         while(temp_tail_rid != rid and current_version >= relative_version and not found_value):
                             
                             # DEBUG PRINT
-                            print(current_tail_rid)
+                            print(temp_tail_rid)
 
 
-                            tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
-                            
-                            # Read schema encoding for this tail record
+                            tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(temp_tail_rid, SCHEMA_ENCODING_COLUMN)
                             tail_schema = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, tail_page_index, tail_slot)
 
                             # DEBUG PRINT
@@ -213,8 +211,6 @@ class Query:
         page_range_index, page_index, page_slot = self.table.get_base_record_location(rid_location[0])
         prev_tail_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
 
-        
-
         base_schema = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, page_index,page_slot)
         updated_base_schema = base_schema | schema_encoding
 
@@ -232,7 +228,14 @@ class Query:
         
         self.table.page_ranges[page_range_index].write_tail_record(new_record.rid, *new_columns)
         self.table.bufferpool.write_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot, new_record.rid)
-        self.table.bufferpool.write_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN,page_index, page_slot, updated_base_schema)
+        self.table.bufferpool.write_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, page_index, page_slot, updated_base_schema)
+
+        # DEBUG PRINT
+        tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(new_record.rid, SCHEMA_ENCODING_COLUMN)
+        tail_schema = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, tail_page_index, tail_slot)
+        binary_str = "{0:05b}".format(tail_schema)  # Convert to binary string with zero-padding
+        reversed_binary_str = binary_str[::-1]     # Reverse the binary digits so I can read schema more easily
+        print(f"In update, tail schema for RID {new_record.rid}: 0b{reversed_binary_str}")
 
         # Update successful
         # print("Update Successful\n")
