@@ -61,6 +61,7 @@ class Query:
         hidden_columns = [None] * NUM_HIDDEN_COLUMNS
         hidden_columns[INDIRECTION_COLUMN] = record.rid
         hidden_columns[RID_COLUMN] = record.rid
+        hidden_columns[UPDATE_TIMESTAMP_COLUMN] = RECORD_NONE_VALUE
         hidden_columns[TIMESTAMP_COLUMN] = int(time())
         hidden_columns[SCHEMA_ENCODING_COLUMN] = 0
         hidden_columns[BASE_PAGE_ID_COLUMN] = record.rid
