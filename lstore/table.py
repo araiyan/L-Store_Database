@@ -74,8 +74,8 @@ class Table:
         with self.page_directory_lock:
             
             # recycle unused RIDs
-            if not self.diallocation_rid_queue.empty():
-                record.rid = self.diallocation_rid_queue.get()
+            if not self.deallocation_base_rid_queue.empty():
+                record.rid = self.deallocation_base_rid_queue.get()
             else:
                 record.rid = self.rid_index
                 self.rid_index += 1
