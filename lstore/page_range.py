@@ -49,7 +49,7 @@ class PageRange:
 
         # mark the frame used after reading
         for i in range(self.total_num_columns):
-            frame_num = self.bufferpool.get_page_frame_num(self.page_range_index, i, page_index, page_slot)
+            frame_num = self.bufferpool.get_page_frame_num(self.page_range_index, i, page_index)
             self.bufferpool.mark_frame_used(frame_num)
 
         return base_record_columns
