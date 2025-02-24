@@ -95,105 +95,86 @@ class Query:
     """
     def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
 
-        # retrieve a list of RIDs that contain the "search_key" value within the column as defined by "search_key_index"
         rid_list = self.table.index.locate(search_key_index, search_key)
 
-        # if there exists no RIDs that match the given parameters, return False
         if not rid_list:
             raise ValueError("No records found with the given key")
         
         record_objs = []
 
-        # iterate through all desired RIDs
         for rid in rid_list:
 
             record_columns = [None] * self.table.num_columns
             page_range_index, base_page_index, base_page_slot = self.table.get_base_record_location(rid)
-
             projected_columns_schema = 0
+            
             for i in range(len(projected_columns_index)):
                 if projected_columns_index[i] == 1:
                     projected_columns_schema |= (1 << i)
 
             # Since primary key is never updated we can grab the primary key column directly from the base page
             if (projected_columns_schema >> self.table.key) & 1 == 1:
-
-                record_columns[self.table.key] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + self.table.key, base_page_index, base_page_slot)
+                record_columns[self.table.key] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + self.table.key,  base_page_index, base_page_slot)
                 projected_columns_schema &= ~(1 << self.table.key)
 
-            # store the (base) page# and index# that the RID/row is located
-            consolidated_stack, indirection_rid = self.__grabConsolidatedStack(rid)
+            base_schema = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, base_page_index, base_page_slot)
+
+
+            # DEBUG PRINTS
+            binary_str = "{0:05b}".format(base_schema)  # Convert to binary string with zero-padding
+            reversed_binary_str = binary_str[::-1]     # Reverse the binary digits so I can read schema more easily
+            print(f"In select: 0b{reversed_binary_str}")
+
+
+            current_tail_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, base_page_index, base_page_slot)
+
+            if current_tail_rid == rid:
+                for i in range(self.table.num_columns):
+                    if (projected_columns_schema >> i) & 1 == 1:
+                        record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
             
-            if len(consolidated_stack) == 0:
-                consolidated_rid = rid
-                consolidated_timestamp = self.table.bufferpool.read_page_slot(page_range_index,TIMESTAMP_COLUMN, base_page_index, base_page_slot)
-
             else:
-                consolidated_rid, consolidated_timestamp = consolidated_stack.pop()
-
-            # print(f"RID: {rid}, Base RID: {consolidated_rid}, Timestamp: {consolidated_timestamp}, Indirection RID: {indirection_rid}")
-
-            # traverse through the tail pages based on the relative version
-            current_version = 0
-            page_locations = self.table.page_ranges[page_range_index].logical_directory.get(indirection_rid, None)
-
-            while indirection_rid != rid and current_version > relative_version and page_locations is not None:
-                current_version -= 1
-                indirection_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_locations[1])
-                tail_timestamp = self.table.bufferpool.read_page_slot(page_range_index, TIMESTAMP_COLUMN, page_locations[1])
-
-                # Skip over newer consolidated pages
-                if consolidated_timestamp > tail_timestamp:
-                    if len(consolidated_stack) > 0:
-                        consolidated_rid, consolidated_timestamp = consolidated_stack.pop()
-
-                    else:
-                        consolidated_rid = rid
-                        consolidated_timestamp = self.table.bufferpool.read_page_slot(page_range_index, TIMESTAMP_COLUMN, base_page_index, base_page_slot)
-
-                page_locations = self.table.page_ranges[page_range_index].logical_directory.get(indirection_rid, None)
-
-            #print("Consolidated stack", consolidated_stack)
-            #print("page Locations", page_locations)
-
-            if(page_locations is not None and len(page_locations) > 1):
-                while projected_columns_schema > 0 and indirection_rid != rid and tail_timestamp >= consolidated_timestamp:
-
-                    tail_timestamp = self.table.bufferpool.read_page_slot(page_range_index, TIMESTAMP_COLUMN, page_locations[1])
-                    schema_column = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, page_locations[1])
-                    
-                    for i in range(self.table.num_columns):
-                        if (((projected_columns_schema >> i) & 1 == 1) and ((schema_column >> i) & 1 == 1)):
-                            
-                            record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, page_locations[1])
-                            projected_columns_schema &= ~(1 << i)
-                            
-                        if projected_columns_schema == 0:
-                            break
-
-                    indirection_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_locations[1])
-                    page_locations = self.table.page_ranges[page_range_index].logical_directory.get(indirection_rid, None)
-                    
-                    if page_locations is not None:
-                        tail_timestamp = self.table.bufferpool.read_page_slot(page_range_index, TIMESTAMP_COLUMN, page_locations[1])
-
-                    else:
-                        break
-
-            if projected_columns_schema > 0:
-                if consolidated_rid == rid:
-
-                    _, consolidated_page_index, consolidated_page_slot = self.table.get_base_record_location(rid)
-
-                else:
-                    consolidated_page_index, consolidated_page_slot = self.table.page_ranges[page_range_index].get_column_location(consolidated_rid, NUM_HIDDEN_COLUMNS + self.table.key)
+                current_version = 0
                 
                 for i in range(self.table.num_columns):
                     if (projected_columns_schema >> i) & 1 == 1:
-                        record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, consolidated_page_index, consolidated_page_slot)
-                        projected_columns_schema &= ~(1 << i)
+                        
+                        # If column has never been updated, read from base record
+                        if (base_schema >> i) & 1 == 0:
+                            record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
+                            continue
+
+                        # Column has been updated, traverse tail records until we find the most recent update
+                        temp_tail_rid = current_tail_rid
+                        found_value = False
+                        
+                        while(temp_tail_rid != rid and current_version >= relative_version and not found_value):
+                            
+                            # DEBUG PRINT
+                            print(current_tail_rid)
+
+
+                            tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
+                            
+                            # Read schema encoding for this tail record
+                            tail_schema = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, tail_page_index, tail_slot)
+
+                            # DEBUG PRINT
+                            binary_str = "{0:05b}".format(tail_schema)  # Convert to binary string with zero-padding
+                            reversed_binary_str = binary_str[::-1]     # Reverse the binary digits so I can read schema more easily
+                            print(f"Tail Schema: 0b{reversed_binary_str}")
+
+
+                            if (tail_schema >> i) & 1 == 1:
+                                record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, tail_page_index, tail_slot)
+                                found_value = True
+                                break
+
+                            temp_tail_rid = self.table.bufferpool.read_page_slot(page_range_index,INDIRECTION_COLUMN, tail_page_index, tail_slot)
+                            current_version -= 1
 
             record_objs.append(Record(rid, record_columns[self.table.key], record_columns))
+
         return record_objs
 
 
@@ -215,7 +196,6 @@ class Query:
         schema_encoding = 0
         projected_columns = []
 
-
         for i, value in enumerate(columns):
 
             # If we're modifying the primary_key then this update should be stopped since we can't change the primary_key column
@@ -231,7 +211,12 @@ class Query:
             new_columns[NUM_HIDDEN_COLUMNS + i] = value
 
         page_range_index, page_index, page_slot = self.table.get_base_record_location(rid_location[0])
-        _, prev_tail_rid = self.__grabConsolidatedStack(rid_location[0])
+        prev_tail_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
+
+        
+
+        base_schema = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, page_index,page_slot)
+        updated_base_schema = base_schema | schema_encoding
 
         new_columns[INDIRECTION_COLUMN] = prev_tail_rid
         new_columns[SCHEMA_ENCODING_COLUMN] = schema_encoding
@@ -239,11 +224,19 @@ class Query:
 
         new_record = Record(rid = -1, key = primary_key, columns = new_columns)
         self.table.assign_rid_to_record(new_record)
+
+        binary_str = "{0:05b}".format(schema_encoding)  # Convert to binary string with zero-padding
+        reversed_binary_str = binary_str[::-1]     # Reverse the binary digits so I can read schema more easily
+        print(f"In update, record schema encoding for record {new_record.rid}: 0b{reversed_binary_str}")
+        
+        
         self.table.page_ranges[page_range_index].write_tail_record(new_record.rid, *new_columns)
         self.table.bufferpool.write_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot, new_record.rid)
+        self.table.bufferpool.write_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN,page_index, page_slot, updated_base_schema)
 
         # Update successful
         # print("Update Successful\n")
+        
         return True
 
     
