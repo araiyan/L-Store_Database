@@ -45,7 +45,7 @@ class PageRange:
         base_record_columns = [None] * self.total_num_columns
         # Read buffer pool frames
         for i in range(self.total_num_columns):
-            base_record_columns = self.bufferpool.read_page_slot(self.page_range_index, i, page_index, page_slot)
+            base_record_columns[i] = self.bufferpool.read_page_slot(self.page_range_index, i, page_index, page_slot)
 
         # mark the frame used after reading
         for i in range(self.total_num_columns):

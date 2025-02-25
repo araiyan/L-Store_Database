@@ -132,11 +132,9 @@ class Table:
 
                     current_rid = indirection_column
                 
-
-                base_record_columns[UPDATE_TIMESTAMP_COLUMN] = time()
-                current_page_range.write_base_record(page_index, page_slot, base_record_columns)
+                base_record_columns[UPDATE_TIMESTAMP_COLUMN] = int(time())
+                self.bufferpool.write_page_slot(merge_request.page_range_index, UPDATE_TIMESTAMP_COLUMN, page_index, page_slot, base_record_columns[UPDATE_TIMESTAMP_COLUMN])
             
-
             self.merge_queue.task_done()
 
     def __insert_base_copy_to_tail_pages(self, page_range:PageRange, base_record_columns):
