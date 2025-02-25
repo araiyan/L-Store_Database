@@ -31,7 +31,7 @@ class Query:
             return False  # Record does not exist
 
         self.table.diallocation_rid_queue.put(base_rid[0])
-        self.table.index.delete_from_index(self.table.key, primary_key, base_rid[0])
+        self.table.index.delete_from_all_indices(primary_key)
 
         # Deletion successful
         return True
@@ -65,7 +65,7 @@ class Query:
         record.columns = hidden_columns + list(columns)
     
         self.table.insert_record(record)
-        self.table.index.insert_to_index(self.table.key, columns[self.table.key], record.rid)
+        self.table.index.insert_in_all_indices(record.columns)
 
         return True
 
@@ -94,11 +94,13 @@ class Query:
     # Assume that select will never be called on a key that doesn't exist
     """
     def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
+
         rid_list = self.table.index.locate(search_key_index, search_key)
         if not rid_list:
             raise ValueError("No records found with the given key")
         
         record_objs = []
+
         for rid in rid_list:
             record_columns = [None] * self.table.num_columns
             page_range_index, base_page_index, base_page_slot = self.table.get_base_record_location(rid)
@@ -109,92 +111,61 @@ class Query:
                     projected_columns_schema |= (1 << i)
 
             if (projected_columns_schema >> self.table.key) & 1 == 1:
-                record_columns[self.table.key] = self.table.bufferpool.read_page_slot(
-                    page_range_index, NUM_HIDDEN_COLUMNS + self.table.key, base_page_index, base_page_slot)
-                frame_num = self.table.bufferpool.get_page_frame_num(
-                    page_range_index, NUM_HIDDEN_COLUMNS + self.table.key, base_page_index)
-                self.table.bufferpool.mark_frame_used(frame_num)
+                record_columns[self.table.key] = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + self.table.key, base_page_index, base_page_slot)
                 projected_columns_schema &= ~(1 << self.table.key)
 
-            base_schema = self.table.bufferpool.read_page_slot(
-                page_range_index, SCHEMA_ENCODING_COLUMN, base_page_index, base_page_slot)
-            frame_num = self.table.bufferpool.get_page_frame_num(
-                page_range_index, SCHEMA_ENCODING_COLUMN, base_page_index)
-            self.table.bufferpool.mark_frame_used(frame_num)
-
-            base_timestamp = self.table.bufferpool.read_page_slot(
-                page_range_index, TIMESTAMP_COLUMN, base_page_index, base_page_slot)
-            frame_num = self.table.bufferpool.get_page_frame_num(
-                page_range_index, TIMESTAMP_COLUMN, base_page_index)
-            self.table.bufferpool.mark_frame_used(frame_num)
-
-            current_tail_rid = self.table.bufferpool.read_page_slot(
-                page_range_index, INDIRECTION_COLUMN, base_page_index, base_page_slot)
-            frame_num = self.table.bufferpool.get_page_frame_num(
-                page_range_index, INDIRECTION_COLUMN, base_page_index)
-            self.table.bufferpool.mark_frame_used(frame_num)
+            base_schema = self.__readAndMarkSlot(page_range_index, SCHEMA_ENCODING_COLUMN, base_page_index, base_page_slot)
+            base_timestamp = self.__readAndMarkSlot(page_range_index, TIMESTAMP_COLUMN, base_page_index, base_page_slot)
+            current_tail_rid = self.__readAndMarkSlot(page_range_index, INDIRECTION_COLUMN, base_page_index, base_page_slot)
 
             if current_tail_rid == rid:
+                
+                # Current RID = base RID, read all columns from the base page
                 for i in range(self.table.num_columns):
                     if (projected_columns_schema >> i) & 1:
-                        record_columns[i] = self.table.bufferpool.read_page_slot(
-                            page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
-                        frame_num = self.table.bufferpool.get_page_frame_num(
-                            page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index)
-                        self.table.bufferpool.mark_frame_used(frame_num)
+                        record_columns[i] = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
+            
             else:
                 current_version = 0
+                
                 for i in range(self.table.num_columns):
                     if (projected_columns_schema >> i) & 1:
                         if (base_schema >> i) & 1 == 0:
-                            record_columns[i] = self.table.bufferpool.read_page_slot(
-                                page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
-                            frame_num = self.table.bufferpool.get_page_frame_num(
-                                page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index)
-                            self.table.bufferpool.mark_frame_used(frame_num)
+                            record_columns[i] = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
                             continue
 
                         temp_tail_rid = current_tail_rid
                         found_value = False
+                        
                         while temp_tail_rid != rid and current_version <= relative_version:
-                            tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(
-                                temp_tail_rid, SCHEMA_ENCODING_COLUMN)
-                            tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(
-                                temp_tail_rid, TIMESTAMP_COLUMN)
+                            tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, SCHEMA_ENCODING_COLUMN)
+                            tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, TIMESTAMP_COLUMN)
                             
                             if (tail_schema >> i) & 1:
+
+                                # Tail_timestamp should be greater than the base_timestamp for current version
                                 if tail_timestamp >= base_timestamp:
+                                    
                                     if relative_version == 0:
-                                        tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(
-                                            temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
-                                        record_columns[i] = self.table.bufferpool.read_page_slot(
-                                            page_range_index, NUM_HIDDEN_COLUMNS + i, tail_page_index, tail_slot)
-                                        frame_num = self.table.bufferpool.get_page_frame_num(
-                                            page_range_index, NUM_HIDDEN_COLUMNS + i, tail_page_index)
-                                        self.table.bufferpool.mark_frame_used(frame_num)
+                                        tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
+                                        record_columns[i] = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + i, tail_page_index, tail_slot)
                                         found_value = True
                                         break
+                                
+                                 # Reading from an older version of the record
                                 else:
                                     current_version += 1
+
                                     if current_version == relative_version:
-                                        tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(
-                                            temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
-                                        record_columns[i] = self.table.bufferpool.read_page_slot(
-                                            page_range_index, NUM_HIDDEN_COLUMNS + i, tail_page_index, tail_slot)
-                                        frame_num = self.table.bufferpool.get_page_frame_num(
-                                            page_range_index, NUM_HIDDEN_COLUMNS + i, tail_page_index)
-                                        self.table.bufferpool.mark_frame_used(frame_num)
+                                        tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
+                                        record_columns[i] = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + i, tail_page_index, tail_slot)
                                         found_value = True
                                         break
-                            temp_tail_rid = self.table.page_ranges[page_range_index].read_tail_record_column(
-                                temp_tail_rid, INDIRECTION_COLUMN)
+
+                            temp_tail_rid = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, INDIRECTION_COLUMN)
                         
                         if not found_value:
-                            record_columns[i] = self.table.bufferpool.read_page_slot(
-                                page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
-                            frame_num = self.table.bufferpool.get_page_frame_num(
-                                page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index)
-                            self.table.bufferpool.mark_frame_used(frame_num)
+                            record_columns[i] = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
             
             record_objs.append(Record(rid, record_columns[self.table.key], record_columns))
         
@@ -220,28 +191,26 @@ class Query:
         projected_columns = []
         
         for i, value in enumerate(columns):
+
+            # If we're modifying the primary_key then this update should be stopped since we can't change the primary_key column
             if i == self.table.key and value is not None:
-                raise KeyError("Primary key cannot be updated")
+                if (self.table.index.locate(self.table.key, value) is not None):
+                    print("Update Error: Primary Key already exists")
+                    return False
+            
             if value is not None:
                 schema_encoding |= (1 << i)
                 projected_columns.append(1)
+            
             else:
                 projected_columns.append(0)
+            
             new_columns[NUM_HIDDEN_COLUMNS + i] = value
 
         page_range_index, page_index, page_slot = self.table.get_base_record_location(rid_location[0])
         
-        prev_tail_rid = self.table.bufferpool.read_page_slot(
-            page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
-        frame_num = self.table.bufferpool.get_page_frame_num(
-            page_range_index, INDIRECTION_COLUMN, page_index)
-        self.table.bufferpool.mark_frame_used(frame_num)
-
-        base_schema = self.table.bufferpool.read_page_slot(
-            page_range_index, SCHEMA_ENCODING_COLUMN, page_index, page_slot)
-        frame_num = self.table.bufferpool.get_page_frame_num(
-            page_range_index, SCHEMA_ENCODING_COLUMN, page_index)
-        self.table.bufferpool.mark_frame_used(frame_num)
+        prev_tail_rid = self.__readAndMarkSlot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
+        base_schema = self.__readAndMarkSlot(page_range_index, SCHEMA_ENCODING_COLUMN, page_index, page_slot)
         
         updated_base_schema = base_schema | schema_encoding
 
@@ -249,18 +218,16 @@ class Query:
         new_columns[SCHEMA_ENCODING_COLUMN] = schema_encoding
         new_columns[TIMESTAMP_COLUMN] = int(time())
 
-        new_record = Record(
-            rid=self.table.page_ranges[page_range_index].assign_logical_rid(),
-            key=primary_key,
-            columns=new_columns
-        )
+        new_record = Record(rid = self.table.page_ranges[page_range_index].assign_logical_rid(), key = primary_key, columns = new_columns)
 
         self.table.page_ranges[page_range_index].write_tail_record(new_record.rid, *new_columns)
         
-        self.table.bufferpool.write_page_slot(
-            page_range_index, INDIRECTION_COLUMN, page_index, page_slot, new_record.rid)
-        self.table.bufferpool.write_page_slot(
-            page_range_index, SCHEMA_ENCODING_COLUMN, page_index, page_slot, updated_base_schema)
+        self.table.bufferpool.write_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot, new_record.rid)
+        self.table.bufferpool.write_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, page_index, page_slot, updated_base_schema)
+
+        # Update successful
+        self.table.index.update_all_indices(primary_key, new_columns)
+        # print("Update Successful\n")
 
         return True
 
@@ -288,83 +255,72 @@ class Query:
     # Returns False if no record exists in the given range
     """
     def sum_version(self, start_range, end_range, aggregate_column_index, relative_version):
+        # Get all RIDs within the specified range
         records_list = self.table.index.locate_range(start_range, end_range, self.table.key)
-        if records_list is None:
+        
+        if not records_list:
             return False
 
         sum_total = 0
         for rid in records_list:
             page_range_index, base_page_index, base_page_slot = self.table.get_base_record_location(rid)
-            
-            base_timestamp = self.table.bufferpool.read_page_slot(
-                page_range_index, TIMESTAMP_COLUMN, base_page_index, base_page_slot)
-            frame_num = self.table.bufferpool.get_page_frame_num(
-                page_range_index, TIMESTAMP_COLUMN, base_page_index)
-            self.table.bufferpool.mark_frame_used(frame_num)
-            
-            current_tail_rid = self.table.bufferpool.read_page_slot(
-                page_range_index, INDIRECTION_COLUMN, base_page_index, base_page_slot)
-            frame_num = self.table.bufferpool.get_page_frame_num(
-                page_range_index, INDIRECTION_COLUMN, base_page_index)
-            self.table.bufferpool.mark_frame_used(frame_num)
 
-            if current_tail_rid == rid:
-                value = self.table.bufferpool.read_page_slot(
-                    page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, base_page_index, base_page_slot)
-                frame_num = self.table.bufferpool.get_page_frame_num(
-                    page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, base_page_index)
-                self.table.bufferpool.mark_frame_used(frame_num)
-            else:
-                current_version = 0
-                value = None
-                temp_tail_rid = current_tail_rid
-                
-                while temp_tail_rid != rid and current_version <= relative_version:
-                    tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(
-                        temp_tail_rid, SCHEMA_ENCODING_COLUMN)
-                    tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(
-                        temp_tail_rid, TIMESTAMP_COLUMN)
-                    
-                    if (tail_schema >> aggregate_column_index) & 1:
-                        if tail_timestamp >= base_timestamp:
-                            if relative_version == 0:
-                                tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(
-                                    temp_tail_rid, NUM_HIDDEN_COLUMNS + aggregate_column_index)
-                                value = self.table.bufferpool.read_page_slot(
-                                    page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, tail_page_index, tail_slot)
-                                # CORRECTED: use the same column index for unpinning.
-                                frame_num = self.table.bufferpool.get_page_frame_num(
-                                    page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, tail_page_index)
-                                self.table.bufferpool.mark_frame_used(frame_num)
-                                break
-                        else:
-                            current_version += 1
-                            if current_version == relative_version:
-                                tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(
-                                    temp_tail_rid, NUM_HIDDEN_COLUMNS + aggregate_column_index)
-                                value = self.table.bufferpool.read_page_slot(
-                                    page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, tail_page_index, tail_slot)
-                                frame_num = self.table.bufferpool.get_page_frame_num(
-                                    page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, tail_page_index)
-                                self.table.bufferpool.mark_frame_used(frame_num)
-                                break
-                    temp_tail_rid = self.table.page_ranges[page_range_index].read_tail_record_column(
-                        temp_tail_rid, INDIRECTION_COLUMN)
-                
-                if value is None:
-                    value = self.table.bufferpool.read_page_slot(
-                        page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, base_page_index, base_page_slot)
-                    frame_num = self.table.bufferpool.get_page_frame_num(
-                        page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, base_page_index)
-                    self.table.bufferpool.mark_frame_used(frame_num)
+            # Step 3: Get Base Record Details
+            base_schema = self.__readAndMarkSlot(page_range_index, SCHEMA_ENCODING_COLUMN, base_page_index, base_page_slot)
+            base_timestamp = self.__readAndMarkSlot(page_range_index, TIMESTAMP_COLUMN, base_page_index, base_page_slot)
             
-            if value is None:
-                value = 0
-            sum_total += value
+            # Get the current tail RID from the base record
+            current_tail_rid = self.__readAndMarkSlot(page_range_index, INDIRECTION_COLUMN, base_page_index, base_page_slot)
+
+            # Step 4: Check if the RID points to the base record
+            if current_tail_rid == (rid % MAX_RECORD_PER_PAGE_RANGE):
+                # Base RID, read directly from the base page
+                aggregate_value = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, base_page_index, base_page_slot)
+                sum_total += aggregate_value
+                continue
+            
+            # Traverse Tail Records by Version
+            current_version = 0
+            found_value = False
+            
+            current_version_rid = current_tail_rid
+            while current_version_rid != (rid % MAX_RECORD_PER_PAGE_RANGE) and current_version <= relative_version:
+                # Read schema and timestamp from the tail record
+                tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(current_version_rid, SCHEMA_ENCODING_COLUMN)
+                tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(current_version_rid, TIMESTAMP_COLUMN)
+
+                # Check if the column was updated in this version
+                if (tail_schema >> aggregate_column_index) & 1:
+                    
+                    # Tail_timestamp should be greater than the base_timestamp for current version
+                    if tail_timestamp >= base_timestamp:
+                        # If looking for the latest version
+                        if relative_version == 0:
+                            tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(current_version_rid, NUM_HIDDEN_COLUMNS + aggregate_column_index)
+                            aggregate_value = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, tail_page_index, tail_slot)
+                            sum_total += aggregate_value
+                            found_value = True
+                            break
+
+                    # Reading from an older version of the record
+                    else:
+                        current_version += 1
+                        if current_version == relative_version:
+                            tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(current_version_rid, NUM_HIDDEN_COLUMNS + aggregate_column_index)
+                            aggregate_value = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, tail_page_index, tail_slot)
+                            sum_total += aggregate_value
+                            found_value = True
+                            break
+
+                # Move to the previous version
+                current_version_rid = self.table.page_ranges[page_range_index].read_tail_record_column(current_version_rid, INDIRECTION_COLUMN)
+
+            # If no value found in tail records, read from base page
+            if not found_value:
+                aggregate_value = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, base_page_index, base_page_slot)
+                sum_total += aggregate_value
 
         return sum_total
-
-
 
     
     """
@@ -383,3 +339,11 @@ class Query:
             u = self.update(key, *updated_columns)
             return u
         return False
+    
+
+    def __readAndMarkSlot(self, page_range_index, column, page_index, page_slot):
+        value = self.table.bufferpool.read_page_slot(page_range_index, column, page_index, page_slot)
+        frame_num = self.table.bufferpool.get_page_frame_num(page_range_index, column, page_index)
+        self.table.bufferpool.mark_frame_used(frame_num)
+
+        return value
