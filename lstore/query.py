@@ -194,8 +194,9 @@ class Query:
 
             # If we're modifying the primary_key then this update should be stopped since we can't change the primary_key column
             if i == self.table.key and value is not None:
-                print("Primary key cannot be updated")
-                return False
+                if (self.table.index.locate(self.table.key, value) is not None):
+                    print("Update Error: Primary Key already exists")
+                    return False
             
             if value is not None:
                 schema_encoding |= (1 << i)
