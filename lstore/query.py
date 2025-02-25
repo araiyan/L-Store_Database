@@ -58,7 +58,7 @@ class Query:
   
         record = Record(rid = None, key = self.table.key, columns = None)
         self.table.assign_rid_to_record(record)
-        print("record inserted", record)
+        #print("record inserted", record)
         hidden_columns = [None] * NUM_HIDDEN_COLUMNS
         hidden_columns[INDIRECTION_COLUMN] = record.rid
         hidden_columns[RID_COLUMN] = record.rid
@@ -273,47 +273,60 @@ class Query:
         sum_total = 0
         for rid in records_list:
             aggregate_column_value = None
-            consolidated_stack, indirection_rid = self.__grab_consolidated_stack(rid)
 
-            consolidated_rid, consolidated_timestamp = consolidated_stack.pop()
-            current_version = 0
-
-            # Locate base page details using buffer pool and page range
+            # Locate the base record location using PageRange and BufferPool
             page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
             page_range: PageRange = self.table.page_ranges[page_range_index]
 
-            # Start from the indirection RID
-            while (indirection_rid != rid and current_version > relative_version):
+            #Get the Last Logical RID for the Record
+            latest_logical_rid = page_range.find_records_last_logical_rid(rid)
+            current_rid = latest_logical_rid
+            current_version = 0
+
+            #Traverse Tail Pages by Version
+            while current_rid >= MAX_RECORD_PER_PAGE_RANGE and current_version > relative_version:
                 current_version -= 1
-                indirection_rid = page_range.read_tail_record_column(indirection_rid, INDIRECTION_COLUMN)
-                tail_timestamp = page_range.read_tail_record_column(indirection_rid, TIMESTAMP_COLUMN)
+                indirection_rid = page_range.read_tail_record_column(current_rid, INDIRECTION_COLUMN)
+                tail_timestamp = page_range.read_tail_record_column(current_rid, TIMESTAMP_COLUMN)
 
-                # Skip newer consolidated pages
-                if (consolidated_timestamp > tail_timestamp):
-                    consolidated_rid, consolidated_timestamp = consolidated_stack.pop()
+                # Continue to the previous version
+                current_rid = indirection_rid
 
-            # Traverse through tail pages to find the value
-            if (indirection_rid != rid):
-                tail_timestamp = page_range.read_tail_record_column(indirection_rid, TIMESTAMP_COLUMN)
-                while (tail_timestamp >= consolidated_timestamp and aggregate_column_value is None):
-                    schema_column = page_range.read_tail_record_column(indirection_rid, SCHEMA_ENCODING_COLUMN)
+            # Traverse Tail Pages for Aggregate Column
+            while current_rid >= MAX_RECORD_PER_PAGE_RANGE and aggregate_column_value is None:
+                schema_column = page_range.read_tail_record_column(current_rid, SCHEMA_ENCODING_COLUMN)
 
-                    # Check if this version contains the value for the aggregate column
-                    if ((schema_column >> aggregate_column_index) & 1 == 1):
-                        aggregate_column_value = page_range.read_tail_record_column(indirection_rid, NUM_HIDDEN_COLUMNS + aggregate_column_index)
+                # Check if the column was updated in this version
+                if ((schema_column >> aggregate_column_index) & 1 == 1):
+                    aggregate_column_value = page_range.read_tail_record_column(current_rid, NUM_HIDDEN_COLUMNS + aggregate_column_index)
 
-                    # Move to the previous version
-                    indirection_rid = page_range.read_tail_record_column(indirection_rid, INDIRECTION_COLUMN)
-                    tail_timestamp = page_range.read_tail_record_column(indirection_rid, TIMESTAMP_COLUMN)
+                # Continue to the previous version
+                current_rid = page_range.read_tail_record_column(current_rid, INDIRECTION_COLUMN)
 
-            # If no tail record found, fetch value from the base record
-            if (aggregate_column_value is None):
-                aggregate_column_value = page_range.read_tail_record_column(consolidated_rid, NUM_HIDDEN_COLUMNS + aggregate_column_index)
-            
+            # Step 6: Base Page Fallback with BufferPool Access
+            if aggregate_column_value is None:
+                # Access hidden columns from base page using BufferPool
+                bufferpool = self.table.bufferpool
+                base_frame_num = bufferpool.get_page_frame_num(page_range_index, aggregate_column_index, page_index)
+
+                # If not in memory, load the frame
+                if base_frame_num is None:
+                    base_frame = bufferpool.get_page_frame(page_range_index, aggregate_column_index, page_index)
+                else:
+                    base_frame = bufferpool.frames[base_frame_num]
+                    base_frame.increment_pin()
+
+                try:
+                    # Read the aggregate column value from the base page
+                    aggregate_column_value = bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, page_index, page_slot)
+                finally:
+                    # Close the frame after all operations are completed
+                    bufferpool.mark_frame_used(base_frame_num)
+
+            # Accumulate the Sum Total
             sum_total += aggregate_column_value
 
         return sum_total
-
     """
     Increments one column of the record
     this implementation should work if your select and update queries already work
