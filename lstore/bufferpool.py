@@ -263,21 +263,31 @@ class BufferPool:
         Returns true if we were properly able to allocate new space for a frame
         '''
         num_used_frames = self.unavailable_frames_queue.qsize()
+        #print("Running replacement policy, available frames:", self.available_frames_queue.qsize(), "unavailable frames:", num_used_frames)
 
         for _ in range(num_used_frames):
-            with self.bufferpool_lock:
-                frame_num = self.unavailable_frames_queue.get()
-                current_frame:Frame = self.frames[frame_num]
+            frame_num = self.unavailable_frames_queue.get()
+            current_frame:Frame = self.frames[frame_num]
 
-                if (current_frame.pin == 0):
-                    #print(f"deleting {current_frame.page_path} from frame_directory")
-                    # If the frame is not being used by any processes then we can deallocate it
+            if (current_frame.pin == 0):
+                #print(f"deleting {current_frame.page_path} from frame_directory")
+                # If the frame is not being used by any processes then we can deallocate it
+                try:
                     del self.frame_directory[current_frame.page_path]
-                    current_frame.unload_page()
-                    self.available_frames_queue.put(frame_num)
-                    return True
-                else:
-                    # If the frame is being used by a process then we put it back in the queue
-                    self.unavailable_frames_queue.put(frame_num)
+                except KeyError:
+                    print("Unable to delete frame from frame_directory", current_frame.page_path)
+                    directory_count = 0
+                    for key in self.frame_directory:
+                        print(key)
+                        directory_count += 1
+                    print("Directory count:", directory_count)
+                    print("Frame count:", self.unavailable_frames_queue.qsize())
+                current_frame.unload_page()
+                self.available_frames_queue.put(frame_num)
+                #print(f"Unloading frame {frame_num}")
+                return True
+            else:
+                # If the frame is being used by a process then we put it back in the queue
+                self.unavailable_frames_queue.put(frame_num)
 
         return False

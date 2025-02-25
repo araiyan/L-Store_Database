@@ -65,7 +65,7 @@ class Table:
         # Start the merge thread
         # Note: This thread will stop running when the main program terminates
         self.merge_thread = threading.Thread(target=self.__merge, daemon=True)
-        #self.merge_thread.start()
+        self.merge_thread.start()
 
     def assign_rid_to_record(self, record: Record):
         '''Use this function to assign a record's RID'''
@@ -135,6 +135,10 @@ class Table:
                 
                 base_record_columns[UPDATE_TIMESTAMP_COLUMN] = int(time())
                 self.bufferpool.write_page_slot(merge_request.page_range_index, UPDATE_TIMESTAMP_COLUMN, page_index, page_slot, base_record_columns[UPDATE_TIMESTAMP_COLUMN])
+
+                # consolidate base page columns
+                for i in range(self.num_columns):
+                    self.bufferpool.write_page_slot(merge_request.page_range_index, NUM_HIDDEN_COLUMNS + i, page_index, page_slot, base_record_columns[i + NUM_HIDDEN_COLUMNS])
             
             self.merge_queue.task_done()
 
