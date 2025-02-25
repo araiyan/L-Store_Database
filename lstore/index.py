@@ -109,12 +109,19 @@ class Index:
 
                 page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
                 indir_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
+                frame_num  = self.table.bufferpool.get_page_frame_num(self, page_range_index, INDIRECTION_COLUMN, page_index)
+                if frame_num:
+                    self.table.bufferpool.mark_frame_used(self, frame_num)
+
 
                 if indir_rid > MAX_RECORD_PER_PAGE_RANGE: #is updated and have tail page
                     column_value = self.table.read_tail_record_column(self, indir_rid, column_number + NUM_HIDDEN_COLUMNS)
 
                 else: #not updated/does not have tail page
                     column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index, page_slot)
+                    frame_num  = self.table.bufferpool.get_page_frame_num(self, page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index)
+                    if frame_num:
+                        self.table.bufferpool.mark_frame_used(self, frame_num)
 
                 #insert {primary_index: {rid: True}} into primary index BTree
                 self.insert_to_index(column_number, column_value, rid)
@@ -321,7 +328,10 @@ class Index:
         #read through bufferpool to get primary index
         for rid in all_base_rids:
             page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
-            primary_key = self.table.bufferpool.read_page_slot(page_range_index, self.key, page_index, page_slot)
+            primary_key = self.table.bufferpool.read_page_slot(page_range_index, self.key + NUM_HIDDEN_COLUMNS, page_index, page_slot)
+            frame_num  = self.table.bufferpool.get_page_frame_num(self, page_range_index, self.key + NUM_HIDDEN_COLUMNS, page_index)
+            if frame_num:
+                self.table.bufferpool.mark_frame_used(self, frame_num)
 
             #insert {primary_index: {rid: True}} into primary index BTree
             self.insert_to_index(self.key, primary_key, rid)
