@@ -31,7 +31,7 @@ class Query:
             return False  # Record does not exist
 
         self.table.diallocation_rid_queue.put(base_rid[0])
-        self.table.index.delete_from_index(self.table.key, primary_key, base_rid[0])
+        self.table.index.delete_from_all_indices(primary_key)
 
         # Deletion successful
         return True
@@ -65,7 +65,7 @@ class Query:
         record.columns = hidden_columns + list(columns)
     
         self.table.insert_record(record)
-        self.table.index.insert_to_index(self.table.key, columns[self.table.key], record.rid)
+        self.table.index.insert_in_all_indices(record.columns)
 
         return True
 
@@ -226,6 +226,7 @@ class Query:
         self.table.bufferpool.write_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, page_index, page_slot, updated_base_schema)
 
         # Update successful
+        self.table.index.update_all_indices(primary_key, new_columns)
         # print("Update Successful\n")
 
         return True
