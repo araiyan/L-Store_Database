@@ -147,7 +147,9 @@ class Table:
 
                 base_record_columns[UPDATE_TIMESTAMP_COLUMN] = time()
                 current_page_range.write_base_record(page_index, page_slot, base_record_columns)
-            
+
+                # after finished merging, call delete(rid) to mark for deallocation
+                self.delete(rid)
 
             self.merge_queue.task_done()
 
@@ -181,13 +183,10 @@ class Table:
 
     def delete(self, rid):
         '''Marks a record for deletion and enqueues it for processing'''
-        if not rid in self.page_directory:
-            return False
-
         page_range_idx, page_idx, page_slot = self.get_base_record_location(rid)
 
-        # mark record as deleted in base pages
-        self.page_ranges[page_range_idx].bufferpool.write_page_slot(page_range_idx, RID_COLUMN, page_idx, page_slot, RECORD_DELETION_FLAG)
+        # # mark record as deleted in base pages
+        # self.page_ranges[page_range_idx].bufferpool.write_page_slot(page_range_idx, RID_COLUMN, page_idx, page_slot, RECORD_DELETION_FLAG)
 
         # take rid and put it in the queue for processing via deallocation worker
         self.deallocation_base_rid_queue.put(rid)
@@ -195,33 +194,34 @@ class Table:
         return True
 
     def __delete_worker(self):
+        '''
+        1. Grabs a RID from `deallocation_base_rid_queue`. 
+        2. Moves the base RID to `allocation_base_rid_queue` for reuse.
+        3. Traverses all tail records and moves their logical RIDs to `allocation_logical_rid_queue` in the corresponding PageRange
+        '''
         while True:
             
             # process base rid deletions (retrieve rid from base deallocation queue)
             rid = self.deallocation_base_rid_queue.get(block=True)
 
-            with self.page_directory_lock:
-                if rid in self.page_directory:
-                    page_range_index, page_index, page_slot = self.get_base_record_location(rid)
-                    page_range = self.page_ranges[page_range_index]
+            # locate page range given rid
+            page_range_idx, page_idx, page_slot = self.get_base_record_location(rid)
+            page_range = self.page_ranges[page_range_idx]
 
-                    # remove base RID from the page directory
-                    del self.page_directory[rid]
+            self.allocation_base_rid_queue.put(rid)
 
-                    # move the base RID to the allocation queue for reuse
-                    self.allocation_base_rid_queue.put(rid)
+            logical_rid = page_range.bufferpool.read_page_slot(page_range_idx, INDIRECTION_COLUMN, page_idx, page_slot)   
 
-                    # process logical RID from indirection column
-                    logical_rid = page_range.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
+            # traverse 
+            while logical_rid >= MAX_RECORD_PER_PAGE_RANGE:
+                page_range.deallocation_logical_rid_queue.put(logical_rid)
+                logical_page_index, logical_page_slot = page_range.get_column_location(logical_rid, INDIRECTION_COLUMN)
+                logical_rid = page_range.bufferpool.read_page_slot(page_range_idx, INDIRECTION_COLUMN, logical_page_index, logical_page_slot)
 
-                    # ensure its a valid tail record
-                    if logical_rid >= MAX_RECORD_PER_PAGE_RANGE:
-                        page_range.deallocation_logical_rid_queue.put(logical_rid)
-
-            self.deallocation_base_rid_queue.task_done()
-
-            # process logical RIDs separately
-            if not page_range.deallocation_logical_rid_queue.empty():
+            # move logical RIDs to allocation queue
+            while not page_range.deallocation_logical_rid_queue.empty():
                 logical_rid = page_range.deallocation_logical_rid_queue.get()
                 page_range.allocation_logical_rid_queue.put(logical_rid)
                 page_range.deallocation_logical_rid_queue.task_done()
+        
+            self.deallocation_base_rid_queue.task_done()
