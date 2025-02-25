@@ -64,7 +64,7 @@ class Table:
         # Start the merge thread
         # Note: This thread will stop running when the main program terminates
         self.merge_thread = threading.Thread(target=self.__merge, daemon=True)
-        self.merge_thread.start()
+        # self.merge_thread.start()
 
     def assign_rid_to_record(self, record: Record):
         '''Use this function to assign a record's RID'''
