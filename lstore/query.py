@@ -61,7 +61,7 @@ class Query:
         hidden_columns[UPDATE_TIMESTAMP_COLUMN] = RECORD_NONE_VALUE
         hidden_columns[TIMESTAMP_COLUMN] = int(time())
         hidden_columns[SCHEMA_ENCODING_COLUMN] = 0
-        hidden_columns[BASE_PAGE_ID_COLUMN] = record.rid
+        #hidden_columns[BASE_PAGE_ID_COLUMN] = record.rid
         record.columns = hidden_columns + list(columns)
     
         self.table.insert_record(record)

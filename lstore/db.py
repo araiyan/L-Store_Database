@@ -8,7 +8,7 @@ import shutil
 
 class Database():
 
-    def __init__(self, path="ECS165"):
+    def __init__(self, path="ECS165 DB"):
         self.tables:dict = {}
         self.path = path
         self.no_path_set = True
