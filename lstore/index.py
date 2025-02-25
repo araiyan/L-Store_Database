@@ -36,7 +36,7 @@ class Index:
 
         #self.deserialize()
 
-        #self.__generate_primary_index()
+        self.__generate_primary_index()
 
 
 
@@ -308,16 +308,7 @@ class Index:
                 values.append(value_mapper_value)
             
         return values if values else None
-
-    """
-    referencing from Raiyan's bufferpool directory in disk
-
-    DB Directory: Folder
-       -> TableName: Folder
-          -> Index: Folder
-            -> Value_Mapper.pkl
-            -> index_{column_number}.pkl
-    """
+    
         
     # use this when open db
     def __generate_primary_index(self):
