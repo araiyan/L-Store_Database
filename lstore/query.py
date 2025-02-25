@@ -101,62 +101,77 @@ class Query:
             raise ValueError("No records found with the given key")
         
         record_objs = []
-
         for rid in rid_list:
-
             record_columns = [None] * self.table.num_columns
-            page_range_index, base_page_index, base_page_slot = self.table.get_base_record_location(rid)
-            projected_columns_schema = 0
             
+            page_range_index, base_page_index, base_page_slot = self.table.get_base_record_location(rid)
+            
+            projected_columns_schema = 0
             for i in range(len(projected_columns_index)):
                 if projected_columns_index[i] == 1:
                     projected_columns_schema |= (1 << i)
 
-            # Since primary key is never updated we can grab the primary key column directly from the base page
+
             if (projected_columns_schema >> self.table.key) & 1 == 1:
-                record_columns[self.table.key] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + self.table.key,  base_page_index, base_page_slot)
+                record_columns[self.table.key] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + self.table.key, base_page_index, base_page_slot)
                 projected_columns_schema &= ~(1 << self.table.key)
 
+
             base_schema = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, base_page_index, base_page_slot)
+            base_timestamp = self.table.bufferpool.read_page_slot(page_range_index, TIMESTAMP_COLUMN, base_page_index, base_page_slot)
 
             current_tail_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, base_page_index, base_page_slot)
 
             if current_tail_rid == rid:
                 for i in range(self.table.num_columns):
-                    if (projected_columns_schema >> i) & 1 == 1:
-                        record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
-            
+                    if (projected_columns_schema >> i) & 1:
+                        record_columns[i] = self.table.bufferpool.read_page_slot(
+                            page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
+
             else:
                 current_version = 0
-                
                 for i in range(self.table.num_columns):
-                    if (projected_columns_schema >> i) & 1 == 1:
-                        
-                        # If column has never been updated, read from base record
+                    if (projected_columns_schema >> i) & 1:
+
                         if (base_schema >> i) & 1 == 0:
                             record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
                             continue
 
+                        
                         temp_tail_rid = current_tail_rid
                         found_value = False
-                        
-                        while(temp_tail_rid != rid and not found_value):
-                            
-                            #  Check if tail_schema in slot is also 1. If it is, read from it and break to next column, else go through indirection for next record
-                            tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, SCHEMA_ENCODING_COLUMN)
-                            if (tail_schema >> i) & 1 == 1:
+                        while temp_tail_rid != rid and current_version <= relative_version:
 
-                                tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
-                                record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, tail_page_index, tail_slot)
+                            tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, SCHEMA_ENCODING_COLUMN)
+                            tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, TIMESTAMP_COLUMN)
+                            
+                            if (tail_schema >> i) & 1:
                                 
-                                found_value = True
-                                break
+                                if tail_timestamp >= base_timestamp:
+                                    if relative_version == 0:
+                                        tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
+                                        record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, tail_page_index, tail_slot)
+                                        found_value = True
+                                        break
+
+                                
+                                else:
+                                    current_version += 1
+                                    if current_version == relative_version:
+                                        tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
+                                        record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, tail_page_index, tail_slot)
+                                        found_value = True
+                                        break
 
                             temp_tail_rid = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, INDIRECTION_COLUMN)
 
+                        if not found_value:
+                            record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
+            
             record_objs.append(Record(rid, record_columns[self.table.key], record_columns))
-
+        
         return record_objs
+
 
 
     
