@@ -98,38 +98,37 @@ class Query:
     # Assume that select will never be called on a key that doesn't exist
     """
     def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
-        # Step 1: Locate the list of RIDs for the given search key and column index
+        #  Locate list of RIDs for the given search key and column index
         rid_list = self.table.index.locate(search_key_index, search_key)
         if not rid_list:
             raise ValueError("No records found with the given key")
 
         record_objs = []
 
-        # Step 2: Iterate through all RIDs
         for rid in rid_list:
             record_columns = [None] * self.table.num_columns
             projected_columns_schema = 0
 
-            # Step 3: Build the projected columns schema bitmap
+            # Build the projected columns schema bitmap
             for i in range(len(projected_columns_index)):
                 if projected_columns_index[i] == 1:
                     projected_columns_schema |= (1 << i)
 
-            # Step 4: Locate the base record location using PageRange and BufferPool
+            # Locate the base record location using PageRange and BufferPool
             page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
             page_range: PageRange = self.table.page_ranges[page_range_index]
 
-            # Step 5: Optimize for Primary Key
+            # Optimize for Primary Key
             # Since the primary key is never updated, fetch it directly from the base record
             if (projected_columns_schema >> self.table.key) & 1 == 1:
                 record_columns[self.table.key] = page_range.read_tail_record_column(rid, NUM_HIDDEN_COLUMNS + self.table.key)
                 projected_columns_schema &= ~(1 << self.table.key)
 
-            # Step 6: Get Consolidated Stack and Indirection RID
+            #Get Consolidated Stack and Indirection RID
             consolidated_stack, indirection_rid = self.__grab_consolidated_stack(rid)
             consolidated_rid, consolidated_timestamp = consolidated_stack.pop()
 
-            # Step 7: Traverse Tail Pages by Version
+            # Traverse Tail Pages by Version
             current_version = 0
             while indirection_rid != rid and current_version > relative_version:
                 current_version -= 1
@@ -140,7 +139,7 @@ class Query:
                 if consolidated_timestamp > tail_timestamp:
                     consolidated_rid, consolidated_timestamp = consolidated_stack.pop()
 
-            # Step 8: Traverse Tail Pages for Projected Columns
+            # Traverse Tail Pages for Projected Columns
             tail_timestamp = page_range.read_tail_record_column(indirection_rid, TIMESTAMP_COLUMN)
             while projected_columns_schema > 0 and indirection_rid != rid and tail_timestamp >= consolidated_timestamp:
                 schema_column = page_range.read_tail_record_column(indirection_rid, SCHEMA_ENCODING_COLUMN)
@@ -158,14 +157,14 @@ class Query:
                 indirection_rid = page_range.read_tail_record_column(indirection_rid, INDIRECTION_COLUMN)
                 tail_timestamp = page_range.read_tail_record_column(indirection_rid, TIMESTAMP_COLUMN)
 
-            # Step 9: If columns are not found in tail pages, fetch from base page
+            # If columns are not found in tail pages, fetch from base page
             if projected_columns_schema > 0:
                 for i in range(self.table.num_columns):
                     if (projected_columns_schema >> i) & 1 == 1:
                         record_columns[i] = page_range.read_tail_record_column(consolidated_rid, NUM_HIDDEN_COLUMNS + i)
                         projected_columns_schema &= ~(1 << i)
 
-            # Step 10: Construct and Append the Record Object
+            # Construct and Append the Record Object
             record_objs.append(Record(rid, record_columns[self.table.key], record_columns))
 
         return record_objs
