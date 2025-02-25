@@ -124,45 +124,58 @@ class Query:
                 record_columns[self.table.key] = page_range.read_tail_record_column(rid, NUM_HIDDEN_COLUMNS + self.table.key)
                 projected_columns_schema &= ~(1 << self.table.key)
 
-            #Get Consolidated Stack and Indirection RID
-            consolidated_stack, indirection_rid = self.__grab_consolidated_stack(rid)
-            consolidated_rid, consolidated_timestamp = consolidated_stack.pop()
+            #Get the Last Logical RID for the Record
+            latest_logical_rid = page_range.find_records_last_logical_rid(rid)
+            current_rid = latest_logical_rid
+            current_version = 0
 
             # Traverse Tail Pages by Version
-            current_version = 0
-            while indirection_rid != rid and current_version > relative_version:
+            while current_rid >= MAX_RECORD_PER_PAGE_RANGE and current_version > relative_version:
                 current_version -= 1
-                indirection_rid = page_range.read_tail_record_column(indirection_rid, INDIRECTION_COLUMN)
-                tail_timestamp = page_range.read_tail_record_column(indirection_rid, TIMESTAMP_COLUMN)
+                indirection_rid = page_range.read_tail_record_column(current_rid, INDIRECTION_COLUMN)
+                tail_timestamp = page_range.read_tail_record_column(current_rid, TIMESTAMP_COLUMN)
 
-                # Skip over newer consolidated pages
-                if consolidated_timestamp > tail_timestamp:
-                    consolidated_rid, consolidated_timestamp = consolidated_stack.pop()
+                # Continue to the previous version
+                current_rid = indirection_rid
 
             # Traverse Tail Pages for Projected Columns
-            tail_timestamp = page_range.read_tail_record_column(indirection_rid, TIMESTAMP_COLUMN)
-            while projected_columns_schema > 0 and indirection_rid != rid and tail_timestamp >= consolidated_timestamp:
-                schema_column = page_range.read_tail_record_column(indirection_rid, SCHEMA_ENCODING_COLUMN)
+            while projected_columns_schema > 0 and current_rid >= MAX_RECORD_PER_PAGE_RANGE:
+                schema_column = page_range.read_tail_record_column(current_rid, SCHEMA_ENCODING_COLUMN)
 
                 for i in range(self.table.num_columns):
                     # Check if the column was updated in this version
                     if ((projected_columns_schema >> i) & 1 == 1) and ((schema_column >> i) & 1 == 1):
-                        record_columns[i] = page_range.read_tail_record_column(indirection_rid, NUM_HIDDEN_COLUMNS + i)
+                        record_columns[i] = page_range.read_tail_record_column(current_rid, NUM_HIDDEN_COLUMNS + i)
                         projected_columns_schema &= ~(1 << i)
 
                     if projected_columns_schema == 0:
                         break
 
-                # Continue with the previous version
-                indirection_rid = page_range.read_tail_record_column(indirection_rid, INDIRECTION_COLUMN)
-                tail_timestamp = page_range.read_tail_record_column(indirection_rid, TIMESTAMP_COLUMN)
+                # Continue to the previous version
+                current_rid = page_range.read_tail_record_column(current_rid, INDIRECTION_COLUMN)
 
-            # If columns are not found in tail pages, fetch from base page
+            # Base Page Fallback with BufferPool Access
             if projected_columns_schema > 0:
-                for i in range(self.table.num_columns):
-                    if (projected_columns_schema >> i) & 1 == 1:
-                        record_columns[i] = page_range.read_tail_record_column(consolidated_rid, NUM_HIDDEN_COLUMNS + i)
-                        projected_columns_schema &= ~(1 << i)
+                # Access hidden columns from base page using BufferPool
+                bufferpool = self.table.bufferpool
+                base_frame_num = bufferpool.get_page_frame_num(page_range_index, INDIRECTION_COLUMN, page_index)
+
+                # If not in memory, load the frame
+                if base_frame_num is None:
+                    base_frame = bufferpool.get_page_frame(page_range_index, INDIRECTION_COLUMN, page_index)
+                else:
+                    base_frame = bufferpool.frames[base_frame_num]
+                    base_frame.increment_pin()
+
+                try:
+                    # Read hidden columns from the base page
+                    for i in range(self.table.total_num_columns):
+                        if (projected_columns_schema >> (i - NUM_HIDDEN_COLUMNS)) & 1 == 1:
+                            record_columns[i - NUM_HIDDEN_COLUMNS] = bufferpool.read_page_slot(page_range_index, i, page_index, page_slot)
+                            projected_columns_schema &= ~(1 << (i - NUM_HIDDEN_COLUMNS))
+                finally:
+                    # Close the frame after all operations are completed
+                    bufferpool.mark_frame_used(base_frame_num)
 
             # Construct and Append the Record Object
             record_objs.append(Record(rid, record_columns[self.table.key], record_columns))
