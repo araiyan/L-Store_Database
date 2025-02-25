@@ -23,6 +23,7 @@ class Index:
         self.num_columns = table.num_columns
         self.key = table.key
         self.table = table
+        #table.deserialize()
 
         self.create_index(self.key)
 
@@ -36,7 +37,7 @@ class Index:
 
         #self.deserialize()
 
-        #self.__generate_primary_index()
+        self.__generate_primary_index()
 
 
 
@@ -46,7 +47,7 @@ class Index:
     # returns None if no rid found
     """
     def locate(self, column, value):
-            
+
         return list(self.indices[column].get(value, [])) or None
 
     """
@@ -108,20 +109,44 @@ class Index:
             for rid in all_base_rids:
 
                 page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
+
                 indir_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
                 frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, INDIRECTION_COLUMN, page_index)
-                if frame_num:
-                    self.table.bufferpool.mark_frame_used(frame_num)
+                self.table.bufferpool.mark_frame_used(frame_num)
 
 
-                if indir_rid > MAX_RECORD_PER_PAGE_RANGE: #is updated and have tail page
-                    column_value = self.table.read_tail_record_column(indir_rid, column_number + NUM_HIDDEN_COLUMNS)
+                """ Referencing latest tail page search from sum version """
+                if indir_rid == (rid % MAX_RECORD_PER_PAGE_RANGE) : # if no updates
 
-                else: #not updated/does not have tail page
                     column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index, page_slot)
                     frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index)
-                    if frame_num:
+                    self.table.bufferpool.mark_frame_used(frame_num)
+
+                else: #if updates
+
+                    base_timestamp = self.table.bufferpool.read_page_slot(page_range_index, TIMESTAMP_COLUMN, page_index, page_slot)
+                    frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, TIMESTAMP_COLUMN, page_index)
+                    self.table.bufferpool.mark_frame_used(frame_num)
+
+                    tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, SCHEMA_ENCODING_COLUMN)
+                    tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, TIMESTAMP_COLUMN)
+
+                    # if the tail page for column is latest updated 
+                    if (tail_schema >> column_number) & 1 and tail_timestamp >= base_timestamp:
+                    
+                        tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(indir_rid, column_number +  NUM_HIDDEN_COLUMNS)
+
+                        column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, tail_page_index, tail_slot)
+                        frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index)
                         self.table.bufferpool.mark_frame_used(frame_num)
+
+                        #column_value = self.__readAndMarkSlot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, tail_page_index, tail_slot)
+
+                    else: # if merged page is latest updated
+                        column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index, page_slot)
+                        frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index)
+                        self.table.bufferpool.mark_frame_used(frame_num)
+
 
                 #insert {primary_index: {rid: True}} into primary index BTree
                 self.insert_to_index(column_number, column_value, rid)
@@ -356,7 +381,6 @@ class Index:
     
     # call index.deserialize(json_data["Index"]) from table
     def deserialize(self, data):
-
         if "value_mapper" in data:
             decoded_value_mapper = base64.b64decode(data["value_mapper"])
             self.value_mapper = pickle.loads(decoded_value_mapper)
