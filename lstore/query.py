@@ -265,66 +265,70 @@ class Query:
     # Returns False if no record exists in the given range
     """
     def sum_version(self, start_range, end_range, aggregate_column_index, relative_version):
+        # Get all RIDs within the specified range
         records_list = self.table.index.locate_range(start_range, end_range, self.table.key)
-
-        if records_list is None:
+        
+        if not records_list:
             return False
 
         sum_total = 0
         for rid in records_list:
-            aggregate_column_value = None
+            page_range_index, base_page_index, base_page_slot = self.table.get_base_record_location(rid)
 
-            # Locate the base record location using PageRange and BufferPool
-            page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
-            page_range: PageRange = self.table.page_ranges[page_range_index]
+            # Step 3: Get Base Record Details
+            base_schema = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, base_page_index, base_page_slot)
+            base_timestamp = self.table.bufferpool.read_page_slot(page_range_index, TIMESTAMP_COLUMN, base_page_index, base_page_slot)
+            
+            # Get the current tail RID from the base record
+            current_tail_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, base_page_index, base_page_slot)
 
-            #Get the Last Logical RID for the Record
-            latest_logical_rid = page_range.find_records_last_logical_rid(rid)
-            current_rid = latest_logical_rid
+            # Step 4: Check if the RID points to the base record
+            if current_tail_rid == rid:
+                # Base RID, read directly from the base page
+                aggregate_value = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, base_page_index, base_page_slot)
+                sum_total += aggregate_value
+                continue
+            
+            # Traverse Tail Records by Version
             current_version = 0
-
-            #Traverse Tail Pages by Version
-            while current_rid >= MAX_RECORD_PER_PAGE_RANGE and current_version > relative_version:
-                current_version -= 1
-                indirection_rid = page_range.read_tail_record_column(current_rid, INDIRECTION_COLUMN)
-                tail_timestamp = page_range.read_tail_record_column(current_rid, TIMESTAMP_COLUMN)
-
-                # Continue to the previous version
-                current_rid = indirection_rid
-
-            # Traverse Tail Pages for Aggregate Column
-            while current_rid >= MAX_RECORD_PER_PAGE_RANGE and aggregate_column_value is None:
-                schema_column = page_range.read_tail_record_column(current_rid, SCHEMA_ENCODING_COLUMN)
+            found_value = False
+            
+            current_version_rid = current_tail_rid
+            while current_version_rid != rid and current_version <= relative_version:
+                # Read schema and timestamp from the tail record
+                tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(current_version_rid, SCHEMA_ENCODING_COLUMN)
+                tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(current_version_rid, TIMESTAMP_COLUMN)
 
                 # Check if the column was updated in this version
-                if ((schema_column >> aggregate_column_index) & 1 == 1):
-                    aggregate_column_value = page_range.read_tail_record_column(current_rid, NUM_HIDDEN_COLUMNS + aggregate_column_index)
+                if (tail_schema >> aggregate_column_index) & 1:
+                    
+                    # Tail_timestamp should be greater than the base_timestamp for current version
+                    if tail_timestamp >= base_timestamp:
+                        # If looking for the latest version
+                        if relative_version == 0:
+                            tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(current_version_rid, NUM_HIDDEN_COLUMNS + aggregate_column_index)
+                            aggregate_value = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, tail_page_index, tail_slot)
+                            sum_total += aggregate_value
+                            found_value = True
+                            break
 
-                # Continue to the previous version
-                current_rid = page_range.read_tail_record_column(current_rid, INDIRECTION_COLUMN)
+                    # Reading from an older version of the record
+                    else:
+                        current_version += 1
+                        if current_version == relative_version:
+                            tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(current_version_rid, NUM_HIDDEN_COLUMNS + aggregate_column_index)
+                            aggregate_value = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, tail_page_index, tail_slot)
+                            sum_total += aggregate_value
+                            found_value = True
+                            break
 
-            # Step 6: Base Page Fallback with BufferPool Access
-            if aggregate_column_value is None:
-                # Access hidden columns from base page using BufferPool
-                bufferpool = self.table.bufferpool
-                base_frame_num = bufferpool.get_page_frame_num(page_range_index, aggregate_column_index, page_index)
+                # Move to the previous version
+                current_version_rid = self.table.page_ranges[page_range_index].read_tail_record_column(current_version_rid, INDIRECTION_COLUMN)
 
-                # If not in memory, load the frame
-                if base_frame_num is None:
-                    base_frame = bufferpool.get_page_frame(page_range_index, aggregate_column_index, page_index)
-                else:
-                    base_frame = bufferpool.frames[base_frame_num]
-                    base_frame.increment_pin()
-
-                try:
-                    # Read the aggregate column value from the base page
-                    aggregate_column_value = bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, page_index, page_slot)
-                finally:
-                    # Close the frame after all operations are completed
-                    bufferpool.mark_frame_used(base_frame_num)
-
-            # Accumulate the Sum Total
-            sum_total += aggregate_column_value
+            # If no value found in tail records, read from base page
+            if not found_value:
+                aggregate_value = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, base_page_index, base_page_slot)
+                sum_total += aggregate_value
 
         return sum_total
     """
