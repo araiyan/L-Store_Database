@@ -119,11 +119,6 @@ class Query:
 
             base_schema = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, base_page_index, base_page_slot)
 
-
-            # DEBUG PRINTS
-            print("Select, Base schema: ", f"{base_schema:05b}"[::-1])
-
-
             current_tail_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, base_page_index, base_page_slot)
 
             if current_tail_rid == rid:
@@ -142,33 +137,22 @@ class Query:
                             record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
                             continue
 
-                        # Column has been updated, traverse tail records until we find the most recent update
                         temp_tail_rid = current_tail_rid
                         found_value = False
                         
-                        while(temp_tail_rid != rid and current_version >= relative_version and not found_value):
+                        while(temp_tail_rid != rid and not found_value):
                             
-                            
-
-
-                            tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
-                            
-                            # Read schema encoding for this tail record
+                            #  Check if tail_schema in slot is also 1. If it is, read from it and break to next column, else go through indirection for next record
                             tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, SCHEMA_ENCODING_COLUMN)
-
                             if (tail_schema >> i) & 1 == 1:
 
-                                # DEBUG PRINT
-                                print(f"Current tail RID: {current_tail_rid}")
-                                print("Select, tail schema: ", f"{tail_schema:05b}"[::-1])
-
-                                print(f"In column {i}")
+                                tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
                                 record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, tail_page_index, tail_slot)
+                                
                                 found_value = True
                                 break
 
-                            temp_tail_rid = self.table.bufferpool.read_page_slot(page_range_index,INDIRECTION_COLUMN, tail_page_index, tail_slot)
-                            current_version -= 1
+                            temp_tail_rid = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, INDIRECTION_COLUMN)
 
             record_objs.append(Record(rid, record_columns[self.table.key], record_columns))
 
@@ -227,10 +211,10 @@ class Query:
 
 
         schema = self.table.page_ranges[page_range_index].read_tail_record_column(new_record.rid, SCHEMA_ENCODING_COLUMN)
-        print("Schema from page ranges: ", f"{schema:05b}"[::-1])
+        # print("Schema from page ranges: ", f"{schema:05b}")
 
         prevRID = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
-        print(f"Indirection of base points to: {prevRID}")    
+        # print(f"Indirection of base points to: {prevRID}")    
 
         # Update successful
         # print("Update Successful\n")

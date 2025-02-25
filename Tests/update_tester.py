@@ -1,34 +1,45 @@
 import sys
+import random
+
 sys.path.append("..")
 from lstore.db import Database
 from lstore.query import Query
 
-# Create the database and the Grades table with 5 columns
-# The first column is the student ID (which is the primary key)
 db = Database()
 grades_table = db.create_table('Grades', 5, 0)
 query = Query(grades_table)
 
-# Insert a hardcoded record into the table:
-# Format: [student_id, grade1, grade2, grade3, grade4]
-record = [92106429, 15, 18, 17, 16]
-query.insert(*record)
+num_records = 10
+records = {}
+student_ids = random.sample(range(10000000, 10010000), num_records)
 
-# For verification, we keep a copy of the record in a dictionary
-records = {92106429: record.copy()}
+print("Inserting records:")
+for student_id in student_ids:
+    record = [student_id] + [random.randint(10, 20) for _ in range(4)]
+    query.insert(*record)
+    records[student_id] = record.copy()
+    print(f"  Student {student_id}:", record)
 
-# Define updates:
-# We'll update column index 2 (third column) and column index 3 (fourth column)
-updated_columns = [None, None, None, None, None]
-updated_columns[2] = 20  # Update grade at column 2 to 20
-updated_columns[3] = 19  # Update grade at column 3 to 19
+num_updates = 3
+for student_id in sorted(records.keys()):
+    print(f"\nPerforming updates for student {student_id}:")
+    for update_num in range(num_updates):
+        updated_columns = [None] * 5
+        num_cols_to_update = random.randint(1, 4)
+        cols_to_update = random.sample(range(1, 5), num_cols_to_update)
+        for col in cols_to_update:
+            new_val = random.randint(10, 30)
+            updated_columns[col] = new_val
+            records[student_id][col] = new_val
+        print(f"  Update #{update_num + 1} with:", updated_columns)
+        query.update(student_id, *updated_columns)
+        record_after = query.select(student_id, 0, [1, 1, 1, 1, 1])[0]
+        if record_after.columns == records[student_id]:
+            print(f"    Update #{update_num + 1} successful:", record_after.columns)
+        else:
+            print(f"    Update #{update_num + 1} error: expected", records[student_id], "but got", record_after.columns)
 
-# Update our test record copy for later comparison
-records[92106429][2] = 20
-records[92106429][3] = 19
-
-# Execute the update on the record with student_id 92106429
-query.update(92106429, *updated_columns)
-
-# Retrieve the updated record from the table.
-# The select function returns a list of
+print("\nFinal verification of all records:")
+for student_id in sorted(records.keys()):
+    record_after = query.select(student_id, 0, [1, 1, 1, 1, 1])[0]
+    print(f"  Student {student_id}: {record_after.columns}")
