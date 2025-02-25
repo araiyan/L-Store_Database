@@ -270,7 +270,7 @@ class Query:
             current_tail_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, base_page_index, base_page_slot)
 
             # Step 4: Check if the RID points to the base record
-            if current_tail_rid == rid:
+            if current_tail_rid == (rid % MAX_RECORD_PER_PAGE_RANGE):
                 # Base RID, read directly from the base page
                 aggregate_value = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, base_page_index, base_page_slot)
                 sum_total += aggregate_value
@@ -281,7 +281,7 @@ class Query:
             found_value = False
             
             current_version_rid = current_tail_rid
-            while current_version_rid != rid and current_version <= relative_version:
+            while current_version_rid != (rid % MAX_RECORD_PER_PAGE_RANGE) and current_version <= relative_version:
                 # Read schema and timestamp from the tail record
                 tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(current_version_rid, SCHEMA_ENCODING_COLUMN)
                 tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(current_version_rid, TIMESTAMP_COLUMN)
