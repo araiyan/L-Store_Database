@@ -204,14 +204,8 @@ class Table:
 
             # traverse 
             while logical_rid >= MAX_RECORD_PER_PAGE_RANGE:
-                page_range.deallocation_logical_rid_queue.put(logical_rid)
+                page_range.allocation_logical_rid_queue.put(logical_rid)
                 logical_page_index, logical_page_slot = page_range.get_column_location(logical_rid, INDIRECTION_COLUMN)
                 logical_rid = page_range.bufferpool.read_page_slot(page_range_idx, INDIRECTION_COLUMN, logical_page_index, logical_page_slot)
-
-            # move logical RIDs to allocation queue
-            while not page_range.deallocation_logical_rid_queue.empty():
-                logical_rid = page_range.deallocation_logical_rid_queue.get()
-                page_range.allocation_logical_rid_queue.put(logical_rid)
-                page_range.deallocation_logical_rid_queue.task_done()
         
             self.deallocation_base_rid_queue.task_done()
