@@ -30,7 +30,7 @@ class Query:
         if(base_rid is None):
             return False  # Record does not exist
 
-        self.table.diallocation_rid_queue.put(base_rid[0])
+        self.table.deallocation_base_rid_queue.put(base_rid[0])
         self.table.index.delete_from_all_indices(primary_key)
 
         # Deletion successful
