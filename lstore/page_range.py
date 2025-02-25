@@ -62,7 +62,8 @@ class PageRange:
             page_index, page_slot = self.get_column_location(logical_rid, INDIRECTION_COLUMN)
             logical_rid = self.bufferpool.read_page_slot(self.page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
             frame_num = self.bufferpool.get_page_frame_num(self.page_range_index, INDIRECTION_COLUMN, page_index)
-            self.bufferpool.mark_frame_used(frame_num)
+            if (frame_num):
+                self.bufferpool.mark_frame_used(frame_num)
 
         return last_logical_rid
 
