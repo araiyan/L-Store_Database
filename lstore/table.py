@@ -181,18 +181,6 @@ class Table:
             "rid_index": self.rid_index
         }
 
-    def delete(self, rid):
-        '''Marks a record for deletion and enqueues it for processing'''
-        page_range_idx, page_idx, page_slot = self.get_base_record_location(rid)
-
-        # # mark record as deleted in base pages
-        # self.page_ranges[page_range_idx].bufferpool.write_page_slot(page_range_idx, RID_COLUMN, page_idx, page_slot, RECORD_DELETION_FLAG)
-
-        # take rid and put it in the queue for processing via deallocation worker
-        self.deallocation_base_rid_queue.put(rid)
-
-        return True
-
     def __delete_worker(self):
         '''
         1. Grabs a RID from `deallocation_base_rid_queue`. 
