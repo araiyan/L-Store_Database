@@ -102,6 +102,7 @@ class BufferPool:
         self.unavailable_frames_queue = Queue(MAX_NUM_FRAME)
         
         self.table_path = table_path
+        self.bufferpool_lock = threading.Lock()
 
         for i in range(MAX_NUM_FRAME):
             self.frames.append(Frame())
@@ -215,7 +216,12 @@ class BufferPool:
 
     def unload_all_frames(self):
         '''Unloads all frames in the bufferpool'''
-        self.__replacement_policy()
+        fail_count = 0
+        while (not self.unavailable_frames_queue.empty()):
+            if (self.__replacement_policy() is False):
+                fail_count += 1
+                if (fail_count > MAX_NUM_FRAME):
+                    raise MemoryError("Unable to unload all frames")
 
     def __load_new_frame(self, page_path:str) -> Frame:
         '''Loads a new frame into the bufferpool'''
@@ -257,21 +263,21 @@ class BufferPool:
         Returns true if we were properly able to allocate new space for a frame
         '''
         num_used_frames = self.unavailable_frames_queue.qsize()
-        replacement_success = False
 
         for _ in range(num_used_frames):
-            frame_num = self.unavailable_frames_queue.get()
-            current_frame:Frame = self.frames[frame_num]
+            with self.bufferpool_lock:
+                frame_num = self.unavailable_frames_queue.get()
+                current_frame:Frame = self.frames[frame_num]
 
-            if (current_frame.pin == 0):
-                #print(f"deleting {current_frame.page_path} from frame_directory")
-                # If the frame is not being used by any processes then we can deallocate it
-                del self.frame_directory[current_frame.page_path]
-                current_frame.unload_page()
-                self.available_frames_queue.put(frame_num)
-                replacement_success = True
-            else:
-                # If the frame is being used by a process then we put it back in the queue
-                self.unavailable_frames_queue.put(frame_num)
+                if (current_frame.pin == 0):
+                    #print(f"deleting {current_frame.page_path} from frame_directory")
+                    # If the frame is not being used by any processes then we can deallocate it
+                    del self.frame_directory[current_frame.page_path]
+                    current_frame.unload_page()
+                    self.available_frames_queue.put(frame_num)
+                    return True
+                else:
+                    # If the frame is being used by a process then we put it back in the queue
+                    self.unavailable_frames_queue.put(frame_num)
 
-        return replacement_success
+        return False
