@@ -34,6 +34,10 @@ class PageRange:
 
         self.page_range_index = page_range_index
 
+        '''setup queues for both base and logical rid allocation'''
+        self.allocation_base_rid_queue = queue.Queue()
+        self.allocation_logical_rid_queue = queue.Queue()
+
     def write_base_record(self, page_index, page_slot, columns) -> bool:
         columns[INDIRECTION_COLUMN] = self.__normalize_rid(columns[RID_COLUMN])
         for (i, column) in enumerate(columns):
@@ -135,8 +139,11 @@ class PageRange:
 
     def assign_logical_rid(self) -> int:
         '''returns logical rid to be assigned to a column'''
-        self.logical_rid_index += 1
-        return self.logical_rid_index - 1
+        if not self.allocation_logical_rid_queue.empty():
+            return self.allocation_logical_rid_queue.get()
+        else:
+            self.logical_rid_index += 1
+            return self.logical_rid_index - 1
     
     def serialize(self):
         '''Returns page metadata as a JSON-compatible dictionary'''
