@@ -208,14 +208,6 @@ class Query:
         self.table.bufferpool.write_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot, new_record.rid)
         self.table.bufferpool.write_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN,page_index, page_slot, updated_base_schema)
 
-
-
-        schema = self.table.page_ranges[page_range_index].read_tail_record_column(new_record.rid, SCHEMA_ENCODING_COLUMN)
-        # print("Schema from page ranges: ", f"{schema:05b}")
-
-        prevRID = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
-        # print(f"Indirection of base points to: {prevRID}")    
-
         # Update successful
         # print("Update Successful\n")
         
