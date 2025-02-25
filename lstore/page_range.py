@@ -1,3 +1,4 @@
+import threading
 from lstore.config import *
 from lstore.bufferpool import BufferPool
 import json
@@ -6,7 +7,8 @@ import queue
 
 class MergeRequest:
     '''Contains information about the tail pages to be merged'''
-    def __init__(self, page_range_index):
+    def __init__(self, page_range_index, turn_off=False):
+        self.turn_off = turn_off
         self.page_range_index = page_range_index
 
 class PageRange:
@@ -15,9 +17,10 @@ class PageRange:
     Indirection column of a base page would contain the logical_rid of its corresponding tail record
     '''
 
-    def __init__(self, page_range_index, num_columns, bufferpool:BufferPool, merge_queue:queue.Queue):
+    def __init__(self, page_range_index, num_columns, bufferpool:BufferPool, merge_queue:queue.Queue, merge_thread:threading.Thread):
         self.bufferpool = bufferpool
         self.merge_queue = merge_queue
+        self.merge_thread = merge_thread
         self.logical_directory = {}
         '''Maps logical rid's to physical locations in page for each column (except hidden columns)'''
         self.logical_rid_index = MAX_RECORD_PER_PAGE_RANGE
@@ -93,7 +96,9 @@ class PageRange:
 
         self.tps += 1
         if (self.tps % (MAX_TAIL_PAGES_BEFORE_MERGING * MAX_RECORD_PER_PAGE) == 0):
-            self.merge_queue.put(MergeRequest(self.page_range_index))
+            self.merge_queue.put(MergeRequest(self.page_range_index)) 
+            if (self.merge_thread.is_alive() == False):
+                self.merge_thread.start()
 
         return True
     

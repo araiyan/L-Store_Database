@@ -64,7 +64,7 @@ class Table:
         self.index = Index(self)
         # Start the merge thread
         # Note: This thread will stop running when the main program terminates
-        self.merge_thread = threading.Thread(target=self.__merge, daemon=True)
+        self.merge_thread = threading.Thread(target=self.__merge)
         self.merge_thread.start()
 
     def assign_rid_to_record(self, record: Record):
@@ -84,19 +84,24 @@ class Table:
         page_range_index, page_index, page_slot = self.get_base_record_location(record.rid)
 
         if (page_range_index >= len(self.page_ranges)):
-            self.page_ranges.append(PageRange(page_range_index, self.num_columns, self.bufferpool, self.merge_queue))
+            self.page_ranges.append(PageRange(page_range_index, self.num_columns, self.bufferpool, self.merge_queue, self.merge_thread))
         
         current_page_range:PageRange = self.page_ranges[page_range_index]
 
         current_page_range.write_base_record(page_index, page_slot, record.columns)   
     
     def __merge(self):
-        print("Merge is happening")
+        # print("Merge is happening")
 
         while True:
             # Block ensures that we wait for a record to be added to the queue first
             # before we continue merging a record
-            merge_request:MergeRequest = self.merge_queue.get(block=True)
+            merge_request = None
+            if (self.merge_queue.empty() is False):
+                merge_request:MergeRequest = self.merge_queue.get(block=False)
+
+            if (merge_request is None):
+                return True
 
             # make a copy of the base page for the recieved rid
             start_rid = merge_request.page_range_index * MAX_RECORD_PER_PAGE_RANGE
@@ -205,7 +210,7 @@ class Table:
 
         for idx, pr_data in enumerate(data['page_ranges']):
         # Fix: Pass required arguments for PageRange
-            page_range = PageRange(idx, self.num_columns, self.bufferpool, self.merge_queue)
+            page_range = PageRange(idx, self.num_columns, self.bufferpool, self.merge_queue, self.merge_thread)
             page_range.deserialize(pr_data)
             self.page_ranges.append(page_range)
             

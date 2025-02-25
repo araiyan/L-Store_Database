@@ -44,8 +44,8 @@ class Database():
 
     def close(self):
         """Flushes dirty pages back to disk, saves table metadata and shuts down"""
-        if self.no_path_set:
-            raise ValueError("Database path is not set. Use open() before closing.")
+        # if self.no_path_set:
+        #     raise ValueError("Database path is not set. Use open() before closing.")
         
         tables_metadata = {}
 
