@@ -316,7 +316,7 @@ class Index:
         self.indices[self.key] = OOBTree()
 
         #get base rid for every record with no duplicates
-        all_base_rids = self.table.grab_all_base_rid()
+        all_base_rids = self.table.grab_all_base_rids()
 
         #read through bufferpool to get primary index
         for rid in all_base_rids:
