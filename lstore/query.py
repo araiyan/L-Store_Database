@@ -122,17 +122,20 @@ class Query:
 
             current_tail_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, base_page_index, base_page_slot)
 
-            if current_tail_rid == rid:
+            if(current_tail_rid == rid):
                 for i in range(self.table.num_columns):
+
+                    # Current RID = base RID, read all columns from the base page
                     if (projected_columns_schema >> i) & 1:
-                        record_columns[i] = self.table.bufferpool.read_page_slot(
-                            page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
+                        record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
 
             else:
+
                 current_version = 0
                 for i in range(self.table.num_columns):
                     if (projected_columns_schema >> i) & 1:
 
+                        # If column has never been updated, read from base record                        
                         if (base_schema >> i) & 1 == 0:
                             record_columns[i] = self.table.bufferpool.read_page_slot(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
                             continue
@@ -140,13 +143,15 @@ class Query:
                         
                         temp_tail_rid = current_tail_rid
                         found_value = False
-                        while temp_tail_rid != rid and current_version <= relative_version:
+                        
+                        while(temp_tail_rid != rid and current_version <= relative_version):
 
                             tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, SCHEMA_ENCODING_COLUMN)
                             tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, TIMESTAMP_COLUMN)
                             
                             if (tail_schema >> i) & 1:
                                 
+                                # Tail_timestamp should be greater than the base_timestamp for current version
                                 if tail_timestamp >= base_timestamp:
                                     if relative_version == 0:
                                         tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
@@ -154,7 +159,7 @@ class Query:
                                         found_value = True
                                         break
 
-                                
+                                # Reading from an older version of the record
                                 else:
                                     current_version += 1
                                     if current_version == relative_version:
