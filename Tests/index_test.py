@@ -59,19 +59,30 @@ class TestIndexMethods(unittest.TestCase):
         print(dict(grades_table.index.indices[1][19]))
 
         #update column value from 19 to 1 and check if index is updated
-        query.table.index.update_all_indices(92106430, [0,0,0,0,0, 0, None, 1, None,None,None])
-        print(dict(grades_table.index.indices[1][1]))
-        print(dict(grades_table.index.indices[1][19]))
+        query.update(92106430, *[None, 1, None,None,None])
+        print(query.table.index.locate(1, 1))
+        #print(dict(grades_table.index.indices[1][19]))
+        print(query.table.index.locate(1, 19))
+        #print(dict(grades_table.index.indices[1][1]))
+        #print(dict(grades_table.index.indices[1][19]))
 
         #update to unique value
-        query.table.index.update_all_indices(92106430, [0,0,0,0,0, 0, None, 123456789, None,None,None])
-        print(dict(grades_table.index.indices[1][123456789]))
-        print(dict(grades_table.index.indices[1][1]))
+        query.update(92106430, *[None, 123456789, 999999,None,None])
+        print(query.table.index.locate(1, 123456789))
+        print(query.table.index.locate(1, 1))
+
         
         #test delete
         #query.table.index.update_all_indices(92106430, [0,0,0,0,0, 0, None, 1, None,None,None])
         print(dict(grades_table.index.indices[1][123456789]))
         query.table.index.delete_from_all_indices(92106430)
+        
+
+        grades_table.index.create_index(2)
+        print(f"create secondary index after updates: {query.table.index.locate(2, 999999)}")
+        print(f"create secondary index after updates: {query.table.index.locate(2,1)}")
+        print(f"create secondary index after updates: {query.table.index.locate(2,2)}")
+        print(f"create secondary index after updates: {query.table.index.locate_range(1, 20,2)}")
 
         # throws error bc its already deleted
         #print(dict(grades_table.index.indices[1][123456789]))
