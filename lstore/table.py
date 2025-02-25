@@ -48,7 +48,7 @@ class Table:
         All others can access the page_dierctory
         '''
         self.page_directory_lock = threading.Lock()
-        self.index = Index(self)
+
 
         # initialize bufferpool in table, not DB
         self.bufferpool = BufferPool(self.table_path)
@@ -63,11 +63,12 @@ class Table:
 
         # The table should handle assigning RIDs
         self.rid_index = 0
-
+        
+        self.index = Index(self)
         # Start the merge thread
         # Note: This thread will stop running when the main program terminates
         self.merge_thread = threading.Thread(target=self.__merge, daemon=True)
-        self.merge_thread.start()
+        # self.merge_thread.start()
 
         # start the deallocation thread
         self.deallocation_thread = threading.Thread(target=self.__delete_worker, daemon=True)
@@ -143,13 +144,10 @@ class Table:
                             base_record_columns[col_index + NUM_HIDDEN_COLUMNS] = current_page_range.read_tail_record_column(current_rid, col_index + NUM_HIDDEN_COLUMNS)
 
                     current_rid = indirection_column
-                
 
-                base_record_columns[UPDATE_TIMESTAMP_COLUMN] = time()
-                current_page_range.write_base_record(page_index, page_slot, base_record_columns)
-
-                # after finished merging, call delete(rid) to mark for deallocation
-                self.delete(rid)
+                base_record_columns[UPDATE_TIMESTAMP_COLUMN] = int(time())
+                self.bufferpool.write_page_slot(merge_request.page_range_index, UPDATE_TIMESTAMP_COLUMN, page_index, page_slot, base_record_columns[UPDATE_TIMESTAMP_COLUMN])
+            
 
             self.merge_queue.task_done()
 
@@ -170,6 +168,10 @@ class Table:
         self.bufferpool.write_page_slot(page_range.page_range_index, INDIRECTION_COLUMN, page_index, page_slot, logical_rid)
 
         return True
+    
+    def grab_all_base_rids(self):
+        '''Returns a list of all base rids'''
+        return list(range(self.rid_index))
         
     def serialize(self):
         """Returns table metadata as a JSON-compatible dictionary"""
