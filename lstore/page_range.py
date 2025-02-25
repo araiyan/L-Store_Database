@@ -34,8 +34,7 @@ class PageRange:
 
         self.page_range_index = page_range_index
 
-        '''setup queues for logical rid allocation/deallocation'''
-        self.deallocation_logical_rid_queue = queue.Queue()
+        '''setup queue for logical rid allocation'''
         self.allocation_logical_rid_queue = queue.Queue()
 
     def write_base_record(self, page_index, page_slot, columns) -> bool:
