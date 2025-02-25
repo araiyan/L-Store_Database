@@ -194,7 +194,8 @@ class Query:
 
             # If we're modifying the primary_key then this update should be stopped since we can't change the primary_key column
             if i == self.table.key and value is not None:
-                raise KeyError("Primary key cannot be updated")
+                print("Primary key cannot be updated")
+                return False
             
             if value is not None:
                 schema_encoding |= (1 << i)
