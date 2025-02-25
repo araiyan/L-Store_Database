@@ -48,7 +48,7 @@ class Table:
         All others can access the page_dierctory
         '''
         self.page_directory_lock = threading.Lock()
-        self.index = Index(self)
+
 
         # initialize bufferpool in table, not DB
         self.bufferpool = BufferPool(self.table_path)
@@ -60,7 +60,8 @@ class Table:
 
         # The table should handle assigning RIDs
         self.rid_index = 0
-
+        
+        self.index = Index(self)
         # Start the merge thread
         # Note: This thread will stop running when the main program terminates
         self.merge_thread = threading.Thread(target=self.__merge, daemon=True)
@@ -156,6 +157,10 @@ class Table:
         self.bufferpool.write_page_slot(page_range.page_range_index, INDIRECTION_COLUMN, page_index, page_slot, logical_rid)
 
         return True
+    
+    def grab_all_base_rids(self):
+        '''Returns a list of all base rids'''
+        return list(range(self.rid_index))
         
     def serialize(self):
         """Returns table metadata as a JSON-compatible dictionary"""
