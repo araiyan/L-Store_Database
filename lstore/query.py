@@ -209,8 +209,8 @@ class Query:
 
         page_range_index, page_index, page_slot = self.table.get_base_record_location(rid_location[0])
         
-        prev_tail_rid = self.__readAndMarkSlot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
-        base_schema = self.__readAndMarkSlot(page_range_index, SCHEMA_ENCODING_COLUMN, page_index, page_slot)
+        prev_tail_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
+        base_schema = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, page_index, page_slot)
         
         updated_base_schema = base_schema | schema_encoding
 
@@ -224,6 +224,11 @@ class Query:
         
         self.table.bufferpool.write_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot, new_record.rid)
         self.table.bufferpool.write_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, page_index, page_slot, updated_base_schema)
+
+        indirFrame_num = self.table.bufferpool.get_page_frame_num(page_range_index, INDIRECTION_COLUMN, page_index)
+        schemaFrame_num = self.table.bufferpool.get_page_frame_num(page_range_index, SCHEMA_ENCODING_COLUMN, page_index)
+        self.table.bufferpool.mark_frame_used(indirFrame_num)
+        self.table.bufferpool.mark_frame_used(schemaFrame_num)
 
         # Update successful
         self.table.index.update_all_indices(primary_key, new_columns)
