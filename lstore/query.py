@@ -36,8 +36,6 @@ class Query:
         # Deletion successful
         return True
 
-    
-
     """
     # Insert a record with specified columns
     # Return True upon succesful insertion
@@ -100,81 +98,95 @@ class Query:
             raise ValueError("No records found with the given key")
         
         record_objs = []
-
+        frames_used = set()     # Instead of just unpinning the frames wheneever we read from them, let's keep track of them and unpin them all at the end of the query
+        
+        # Convert the projected_columns_index to a schema encoding
+        projected_columns_schema = sum(1 << i for i, val in enumerate(projected_columns_index) if val == 1)
+        
         for rid in rid_list:
-            record_columns = [None] * self.table.num_columns
             page_range_index, base_page_index, base_page_slot = self.table.get_base_record_location(rid)
+            record_columns = [None] * self.table.num_columns
+            base_schema = self.__readAndTrack(page_range_index, SCHEMA_ENCODING_COLUMN, base_page_index, base_page_slot, frames_used)
             
-            projected_columns_schema = 0
-            for i in range(len(projected_columns_index)):
-                if projected_columns_index[i] == 1:
-                    projected_columns_schema |= (1 << i)
-
-            if (projected_columns_schema >> self.table.key) & 1 == 1:
-                record_columns[self.table.key] = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + self.table.key, base_page_index, base_page_slot)
-                projected_columns_schema &= ~(1 << self.table.key)
-
-            base_schema = self.__readAndMarkSlot(page_range_index, SCHEMA_ENCODING_COLUMN, base_page_index, base_page_slot)
-            base_timestamp = self.__readAndMarkSlot(page_range_index, TIMESTAMP_COLUMN, base_page_index, base_page_slot)
-            current_tail_rid = self.__readAndMarkSlot(page_range_index, INDIRECTION_COLUMN, base_page_index, base_page_slot)
-
-            if current_tail_rid == rid:
-                
-                # Current RID = base RID, read all columns from the base page
+            # No changes made, read directly from base record
+            if(base_schema == 0):
                 for i in range(self.table.num_columns):
                     if (projected_columns_schema >> i) & 1:
-                        record_columns[i] = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
-            
+                        record_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot, frames_used)
+                
             else:
-                current_version = 0
+                current_tail_rid = self.__readAndTrack(page_range_index, INDIRECTION_COLUMN, base_page_index, base_page_slot, frames_used)
                 
                 for i in range(self.table.num_columns):
-                    if (projected_columns_schema >> i) & 1:
-                        if (base_schema >> i) & 1 == 0:
-                            record_columns[i] = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
-                            continue
-
-                        temp_tail_rid = current_tail_rid
-                        found_value = False
+                    if not ((projected_columns_schema >> i) & 1):
+                        continue
                         
-                        while temp_tail_rid != rid and current_version <= relative_version:
-                            tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, SCHEMA_ENCODING_COLUMN)
-                            tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, TIMESTAMP_COLUMN)
+                    if not ((base_schema >> i) & 1):
+                        record_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot, frames_used)
+                        continue
+                    
+                    # Reading the latest version of the record
+                    if relative_version == 0:
+                        tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(current_tail_rid, SCHEMA_ENCODING_COLUMN)
+                        
+                        if (tail_schema >> i) & 1:
+                            record_columns[i] = self.table.page_ranges[page_range_index].read_tail_record_column(current_tail_rid, NUM_HIDDEN_COLUMNS + i)
+                        
+                        else:
+                            temp_tail_rid = current_tail_rid
+                            schema_cache = {current_tail_rid: tail_schema}
                             
-                            if (tail_schema >> i) & 1:
-
-                                # Tail_timestamp should be greater than the base_timestamp for current version
-                                if tail_timestamp >= base_timestamp:
-                                    
-                                    if relative_version == 0:
-                                        tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
-                                        record_columns[i] = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + i, tail_page_index, tail_slot)
-                                        found_value = True
-                                        break
+                            # Traverse chain until we find the latest tail record with the desired column from schema
+                            while True:
+                                prev_tail_rid = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, INDIRECTION_COLUMN)
                                 
-                                 # Reading from an older version of the record
-                                else:
-                                    current_version += 1
-
-                                    if current_version == relative_version:
-                                        tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
-                                        record_columns[i] = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + i, tail_page_index, tail_slot)
-                                        found_value = True
-                                        break
-
-                            temp_tail_rid = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, INDIRECTION_COLUMN)
+                                if(prev_tail_rid == rid or prev_tail_rid is None):
+                                    record_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot, frames_used)
+                                    break
+                                
+                                if(prev_tail_rid not in schema_cache):
+                                    schema_cache[prev_tail_rid] = self.table.page_ranges[page_range_index].read_tail_record_column(prev_tail_rid, SCHEMA_ENCODING_COLUMN)
+                                
+                                if (schema_cache[prev_tail_rid] >> i) & 1:
+                                    record_columns[i] = self.table.page_ranges[page_range_index].read_tail_record_column(prev_tail_rid, NUM_HIDDEN_COLUMNS + i)
+                                    break
+                                
+                                temp_tail_rid = prev_tail_rid
+                    
+                    # Reading a specific version of the record
+                    else:
+                        base_timestamp = self.__readAndTrack(page_range_index, TIMESTAMP_COLUMN, base_page_index, base_page_slot)
+                        current_version = 0
+                        temp_tail_rid = current_tail_rid
                         
-                        if not found_value:
-                            record_columns[i] = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
+                        # Traverse chain until we find the requested version
+                        while temp_tail_rid != rid and temp_tail_rid is not None:
+                            tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(page_range_index, temp_tail_rid, SCHEMA_ENCODING_COLUMN)
+                            tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(page_range_index, temp_tail_rid, TIMESTAMP_COLUMN)
+                            
+                            if ((tail_schema >> i) & 1 and tail_timestamp >= base_timestamp):
+                                current_version += 1
+                                if current_version == relative_version:
+                                    record_columns[i] = self.table.page_ranges[page_range_index].read_tail_record_column(page_range_index, temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
+                                    break
+                            
+                            temp_tail_rid = self.table.page_ranges[page_range_index].read_tail_record_column(page_range_index, temp_tail_rid, INDIRECTION_COLUMN)
+                        
+                        # If we didn't find the requested version, use base record
+                        if temp_tail_rid == rid or temp_tail_rid is None or current_version < relative_version:
+                            record_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
+                    
+            if(record_columns[self.table.key] is None): 
+                record_columns[self.table.key] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + self.table.key, base_page_index, base_page_slot, frames_used)
             
             record_objs.append(Record(rid, record_columns[self.table.key], record_columns))
         
+        # Mark all frames as used after processing
+        for frame_num in frames_used:
+            self.table.bufferpool.mark_frame_used(frame_num)
+
         return record_objs
 
-
-
-
-    
     """
     # Update a record with specified key and columns
     # Returns True if update is succesful
@@ -351,4 +363,9 @@ class Query:
         frame_num = self.table.bufferpool.get_page_frame_num(page_range_index, column, page_index)
         self.table.bufferpool.mark_frame_used(frame_num)
 
+        return value
+    
+    def __readAndTrack(self, page_range_index, column, page_index, slot, frames_used):
+        value = self.table.bufferpool.read_page_slot(page_range_index, column, page_index, slot)
+        frames_used.add(self.table.bufferpool.get_page_frame_num(page_range_index, column, page_index))
         return value
