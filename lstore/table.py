@@ -84,11 +84,27 @@ class Table:
         page_range_index, page_index, page_slot = self.get_base_record_location(record.rid)
 
         if (page_range_index >= len(self.page_ranges)):
-            self.page_ranges.append(PageRange(page_range_index, self.num_columns, self.bufferpool, self.merge_queue, self.merge_thread))
+            self.page_ranges.append(PageRange(page_range_index, self.num_columns, self.bufferpool))
         
         current_page_range:PageRange = self.page_ranges[page_range_index]
 
         current_page_range.write_base_record(page_index, page_slot, record.columns)   
+
+    def update_record(self, rid, columns) -> bool:
+        '''Updates a record given its RID'''
+        page_range_index = rid // MAX_RECORD_PER_PAGE_RANGE
+        current_page_range:PageRange = self.page_ranges[page_range_index]
+
+        update_success = current_page_range.write_tail_record(columns[RID_COLUMN], *columns)
+
+        if (current_page_range.tps % (MAX_TAIL_PAGES_BEFORE_MERGING * MAX_RECORD_PER_PAGE) == 0):
+            self.merge_queue.put(MergeRequest(current_page_range.page_range_index)) 
+            if (self.merge_thread.is_alive() == False):
+                self.merge_thread = threading.Thread(target=self.__merge)
+                self.merge_thread.start()
+
+        return update_success
+
     
     def __merge(self):
         # print("Merge is happening")
@@ -210,7 +226,7 @@ class Table:
 
         for idx, pr_data in enumerate(data['page_ranges']):
         # Fix: Pass required arguments for PageRange
-            page_range = PageRange(idx, self.num_columns, self.bufferpool, self.merge_queue, self.merge_thread)
+            page_range = PageRange(idx, self.num_columns, self.bufferpool)
             page_range.deserialize(pr_data)
             self.page_ranges.append(page_range)
             

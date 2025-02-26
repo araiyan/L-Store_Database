@@ -17,10 +17,8 @@ class PageRange:
     Indirection column of a base page would contain the logical_rid of its corresponding tail record
     '''
 
-    def __init__(self, page_range_index, num_columns, bufferpool:BufferPool, merge_queue:queue.Queue, merge_thread:threading.Thread):
+    def __init__(self, page_range_index, num_columns, bufferpool:BufferPool):
         self.bufferpool = bufferpool
-        self.merge_queue = merge_queue
-        self.merge_thread = merge_thread
         self.logical_directory = {}
         '''Maps logical rid's to physical locations in page for each column (except hidden columns)'''
         self.logical_rid_index = MAX_RECORD_PER_PAGE_RANGE
@@ -95,11 +93,6 @@ class PageRange:
                 self.logical_directory[logical_rid][i - NUM_HIDDEN_COLUMNS] = (self.tail_page_index[i] * MAX_RECORD_PER_PAGE) + page_slot
 
         self.tps += 1
-        if (self.tps % (MAX_TAIL_PAGES_BEFORE_MERGING * MAX_RECORD_PER_PAGE) == 0):
-            self.merge_queue.put(MergeRequest(self.page_range_index)) 
-            if (self.merge_thread.is_alive() == False):
-                self.merge_thread.start()
-
         return True
     
     def read_tail_record_column(self, logical_rid, column) -> int:

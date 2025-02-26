@@ -235,7 +235,9 @@ class Query:
 
         new_record = Record(rid = self.table.page_ranges[page_range_index].assign_logical_rid(), key = primary_key, columns = new_columns)
 
-        self.table.page_ranges[page_range_index].write_tail_record(new_record.rid, *new_columns)
+        new_columns[RID_COLUMN] = new_record.rid
+
+        self.table.update_record(rid_location[0], new_columns)
         
         self.table.bufferpool.write_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot, new_record.rid)
         self.table.bufferpool.write_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, page_index, page_slot, updated_base_schema)
