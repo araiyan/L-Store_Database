@@ -8,7 +8,7 @@ import shutil
 
 class Database():
 
-    def __init__(self, path="ECS165"):
+    def __init__(self, path="ECS165 DB"):
         self.tables:dict = {}
         self.path = path
         self.no_path_set = True
@@ -38,30 +38,20 @@ class Database():
                     table = Table(table_name, table_info["num_columns"], table_info["key_index"], self.path)
                     self.tables[table_name] = table
 
-                    # retores table rid_index
-                    table.rid_index = table_info.get("rid_index", 0)
-
-                    # restores page directory for table - converts keys back into correct data type (string --> integer)
-                    table.page_directory = {}
-                    for k, v in table_info["page_directory"].items():
-                        table.page_directory[int(k)] = v
-
-                    # initialize indexes for table
-                    table.index = Index(table)
+                    # restore table metadata
+                    table.deserialize(table_info)
                     
 
     def close(self):
         """Flushes dirty pages back to disk, saves table metadata and shuts down"""
-        if self.no_path_set:
-            raise ValueError("Database path is not set. Use open() before closing.")
+        # if self.no_path_set:
+        #     raise ValueError("Database path is not set. Use open() before closing.")
         
         tables_metadata = {}
 
         for table_name, table in self.tables.items():
             # flush dirty pages from table's bufferpool
-            for frame in table.bufferpool.frames:
-                if frame.dirty:
-                    frame.unload_page()
+            table.bufferpool.unload_all_frames()
 
             # serialize table metadata
             tables_metadata[table_name] = table.serialize()
@@ -112,6 +102,6 @@ class Database():
         return self.tables[name]
     
     def __remove_db_path(self):
-            if os.path.exists(self.path):
-                shutil.rmtree(self.path)
+        if os.path.exists(self.path):
+            shutil.rmtree(self.path)
 
