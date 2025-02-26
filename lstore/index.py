@@ -101,7 +101,7 @@ class Index:
         if self.indices[column_number] == None:
 
             self.indices[column_number] = OOBTree()
-
+            frames_used = []
             # go through value mapper to create new index
             all_base_rids = self.grab_all()
 
@@ -112,7 +112,7 @@ class Index:
 
                 indir_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
                 frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, INDIRECTION_COLUMN, page_index)
-                self.table.bufferpool.mark_frame_used(frame_num)
+                frames_used.append(frame_num)
 
 
                 """ Referencing latest tail page search from sum version """
@@ -120,13 +120,13 @@ class Index:
 
                     column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index, page_slot)
                     frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index)
-                    self.table.bufferpool.mark_frame_used(frame_num)
+                    frames_used.append(frame_num)
 
                 else: #if updates
 
                     base_timestamp = self.table.bufferpool.read_page_slot(page_range_index, TIMESTAMP_COLUMN, page_index, page_slot)
                     frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, TIMESTAMP_COLUMN, page_index)
-                    self.table.bufferpool.mark_frame_used(frame_num)
+                    frames_used.append(frame_num)
 
                     tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, SCHEMA_ENCODING_COLUMN)
                     tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, TIMESTAMP_COLUMN)
@@ -138,18 +138,19 @@ class Index:
 
                         column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, tail_page_index, tail_slot)
                         frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index)
-                        self.table.bufferpool.mark_frame_used(frame_num)
-
-                        #column_value = self.__readAndMarkSlot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, tail_page_index, tail_slot)
+                        frames_used.append(frame_num)
 
                     else: # if merged page is latest updated
                         column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index, page_slot)
                         frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index)
-                        self.table.bufferpool.mark_frame_used(frame_num)
+                        frames_used.append(frame_num)
 
 
                 #insert {primary_index: {rid: True}} into primary index BTree
                 self.insert_to_index(column_number, column_value, rid)
+
+                for frame in frames_used:
+                    self.table.bufferpool.mark_frame_used(frame)
 
             return True
         else:
@@ -346,17 +347,18 @@ class Index:
 
         #get base rid for every record with no duplicates
         all_base_rids = self.table.grab_all_base_rids()
-
+        frames_used = []
         #read through bufferpool to get primary index
         for rid in all_base_rids:
             page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
             primary_key = self.table.bufferpool.read_page_slot(page_range_index, self.key + NUM_HIDDEN_COLUMNS, page_index, page_slot)
             frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, self.key + NUM_HIDDEN_COLUMNS, page_index)
-            if frame_num:
-                self.table.bufferpool.mark_frame_used(frame_num)
-
+            frames_used.append(frame_num)
             #insert {primary_index: {rid: True}} into primary index BTree
             self.insert_to_index(self.key, primary_key, rid)
+        
+        for frame in frames_used:
+            self.table.bufferpool.mark_frame_used(frame)
     
     # call "index:": self.index.serialize() from table
     # pickle every index BTree and then store them in base64
