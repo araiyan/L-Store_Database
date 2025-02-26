@@ -80,7 +80,49 @@ class Query:
     """
     def select(self, search_key, search_key_index, projected_columns_index):
         # retrieve a list of RIDs that contain the "search_key" value within the column as defined by "search_key_index"
-        return self.select_version(search_key, search_key_index, projected_columns_index, 0)
+        rid_list = self.table.index.locate(search_key_index, search_key)
+        if not rid_list:
+            raise ValueError("No records found with the given key")
+
+        record_objs = []
+        frames_used = Queue()  # Replaced set with a queue for FIFO processing
+
+        # Convert the projected_columns_index to a schema encoding
+        projected_columns_schema = sum(1 << i for i, val in enumerate(projected_columns_index) if val == 1)
+
+        for rid in rid_list:
+            page_range_index, base_page_index, base_page_slot = self.table.get_base_record_location(rid)
+            record_columns = [None] * self.table.num_columns
+            base_schema = self.__readAndTrack(page_range_index, SCHEMA_ENCODING_COLUMN, base_page_index, base_page_slot, frames_used)
+
+            base_delta_schema = projected_columns_schema ^ base_schema
+            current_schema = projected_columns_schema
+
+            # read unupdated columns from base pages
+            for i in range(self.table.num_columns):
+                if (base_delta_schema >> i) & 1:
+                    record_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot, frames_used)
+                    current_schema ^= (1 << i)
+
+            # read the rest from tail pages
+            indirection_column = self.__readAndTrack(page_range_index, INDIRECTION_COLUMN, base_page_index, base_page_slot, frames_used)
+            while indirection_column >= MAX_RECORD_PER_PAGE_RANGE and current_schema > 0:
+                tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(indirection_column, SCHEMA_ENCODING_COLUMN)
+                for i in range(self.table.num_columns):
+                    if ((current_schema >> i) & 1) and ((tail_schema >> i) & 1):
+                        record_columns[i] = self.table.page_ranges[page_range_index].read_tail_record_column(indirection_column, NUM_HIDDEN_COLUMNS + i)
+                        current_schema ^= (1 << i)
+
+                indirection_column = self.table.page_ranges[page_range_index].read_tail_record_column(indirection_column, INDIRECTION_COLUMN)
+                
+            record_objs.append(Record(rid, record_columns[self.table.key], record_columns))
+
+            # Mark all frames as used after processing, using FIFO order
+            while not frames_used.empty():
+                frame_num = frames_used.get()
+                self.table.bufferpool.mark_frame_used(frame_num)
+
+        return record_objs
     
     """
     # Read matching record with specified search key
@@ -203,7 +245,6 @@ class Query:
         
         new_columns = [None] * self.table.total_num_columns
         schema_encoding = 0
-        projected_columns = []
         
         for i, value in enumerate(columns):
 
@@ -215,10 +256,6 @@ class Query:
             
             if value is not None:
                 schema_encoding |= (1 << i)
-                projected_columns.append(1)
-            
-            else:
-                projected_columns.append(0)
             
             new_columns[NUM_HIDDEN_COLUMNS + i] = value
 
