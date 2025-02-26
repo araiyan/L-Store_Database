@@ -71,7 +71,7 @@ class Table:
         self.merge_thread.start()
 
         # start the deallocation thread
-        self.deallocation_thread = threading.Thread(target=self.__delete_worker)
+        self.deallocation_thread = threading.Thread(target=self.__delete_worker, daemon=True)
         self.deallocation_thread.start()
 
     def assign_rid_to_record(self, record: Record):
@@ -183,8 +183,6 @@ class Table:
             
             self.merge_queue.task_done()
 
-            # process deletions after merge completes
-            self.__delete_worker()
 
     def __insert_base_copy_to_tail_pages(self, page_range:PageRange, base_record_columns):
         '''Inserts a copy of the base record to the last tail page of the record'''
@@ -277,10 +275,9 @@ class Table:
         2. Moves the base RID to `allocation_base_rid_queue` for reuse.
         3. Traverses all tail records and moves their logical RIDs to `allocation_logical_rid_queue` in the corresponding PageRange
         '''
-        while not self.deallocation_base_rid_queue.empty():
-            try:
+        while True:
                 # process base rid deletions (retrieve rid from base deallocation queue)
-                rid = self.deallocation_base_rid_queue.get(block=True, timeout=2)
+                rid = self.deallocation_base_rid_queue.get(block=True)
 
                 # locate page range given rid
                 page_range_idx, page_idx, page_slot = self.get_base_record_location(rid)
@@ -297,6 +294,3 @@ class Table:
                     logical_rid = page_range.bufferpool.read_page_slot(page_range_idx, INDIRECTION_COLUMN, logical_page_index, logical_page_slot)
             
                 self.deallocation_base_rid_queue.task_done()
-            
-            except queue.Empty:
-                break
