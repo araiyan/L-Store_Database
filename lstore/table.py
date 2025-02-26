@@ -64,7 +64,7 @@ class Table:
         self.index = Index(self)
         # Start the merge thread
         # Note: This thread will stop running when the main program terminates
-        self.merge_thread = threading.Thread(target=self.__merge)
+        self.merge_thread = threading.Thread(target=self.__merge, daemon=True)
         self.merge_thread.start()
 
     def assign_rid_to_record(self, record: Record):
@@ -104,9 +104,9 @@ class Table:
 
         if (current_page_range.tps % (MAX_TAIL_PAGES_BEFORE_MERGING * MAX_RECORD_PER_PAGE) == 0):
             self.merge_queue.put(MergeRequest(current_page_range.page_range_index)) 
-            if (self.merge_thread.is_alive() == False):
-                self.merge_thread = threading.Thread(target=self.__merge)
-                self.merge_thread.start()
+            # if (self.merge_thread.is_alive() == False):
+            #     self.merge_thread = threading.Thread(target=self.__merge)
+            #     self.merge_thread.start()
 
         return update_success
 
@@ -117,12 +117,8 @@ class Table:
         while True:
             # Block ensures that we wait for a record to be added to the queue first
             # before we continue merging a record
-            merge_request = None
-            if (self.merge_queue.empty() is False):
-                merge_request:MergeRequest = self.merge_queue.get(block=False)
+            merge_request:MergeRequest = self.merge_queue.get()
 
-            if (merge_request is None):
-                return True
 
             # make a copy of the base page for the recieved rid
             start_rid = merge_request.page_range_index * MAX_RECORD_PER_PAGE_RANGE
