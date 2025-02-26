@@ -34,10 +34,9 @@ query.py: select_verion improvements  Derrick +33
 query.py: sum                         Molly +66
 query.py: extra testcases             Molly 147
 query.py: optamizations               Raiyan +72
-```
 
 ## Total Contributions:
-```
+
 Raiyan  +1090
 Leo     +540
 Tracy   +481
