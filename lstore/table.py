@@ -278,7 +278,7 @@ class Table:
         while True:
             
             # process base rid deletions (retrieve rid from base deallocation queue)
-            rid = self.deallocation_base_rid_queue.get(block=True)
+            rid = self.deallocation_base_rid_queue.get(block=True, timeout=2)
 
             # locate page range given rid
             page_range_idx, page_idx, page_slot = self.get_base_record_location(rid)
