@@ -181,8 +181,10 @@ class Table:
                 for i in range(self.num_columns):
                     self.bufferpool.write_page_slot(merge_request.page_range_index, NUM_HIDDEN_COLUMNS + i, page_index, page_slot, base_record_columns[i + NUM_HIDDEN_COLUMNS])
             
-
             self.merge_queue.task_done()
+
+            # process deletions after merge completes
+            self.__delete_worker()
 
     def __insert_base_copy_to_tail_pages(self, page_range:PageRange, base_record_columns):
         '''Inserts a copy of the base record to the last tail page of the record'''
@@ -275,23 +277,26 @@ class Table:
         2. Moves the base RID to `allocation_base_rid_queue` for reuse.
         3. Traverses all tail records and moves their logical RIDs to `allocation_logical_rid_queue` in the corresponding PageRange
         '''
-        while True:
+        while not self.deallocation_base_rid_queue.empty():
+            try:
+                # process base rid deletions (retrieve rid from base deallocation queue)
+                rid = self.deallocation_base_rid_queue.get(block=True, timeout=2)
+
+                # locate page range given rid
+                page_range_idx, page_idx, page_slot = self.get_base_record_location(rid)
+                page_range = self.page_ranges[page_range_idx]
+
+                self.allocation_base_rid_queue.put(rid)
+
+                logical_rid = page_range.bufferpool.read_page_slot(page_range_idx, INDIRECTION_COLUMN, page_idx, page_slot)   
+
+                # traverse 
+                while logical_rid >= MAX_RECORD_PER_PAGE_RANGE:
+                    page_range.allocation_logical_rid_queue.put(logical_rid)
+                    logical_page_index, logical_page_slot = page_range.get_column_location(logical_rid, INDIRECTION_COLUMN)
+                    logical_rid = page_range.bufferpool.read_page_slot(page_range_idx, INDIRECTION_COLUMN, logical_page_index, logical_page_slot)
             
-            # process base rid deletions (retrieve rid from base deallocation queue)
-            rid = self.deallocation_base_rid_queue.get(block=True, timeout=2)
-
-            # locate page range given rid
-            page_range_idx, page_idx, page_slot = self.get_base_record_location(rid)
-            page_range = self.page_ranges[page_range_idx]
-
-            self.allocation_base_rid_queue.put(rid)
-
-            logical_rid = page_range.bufferpool.read_page_slot(page_range_idx, INDIRECTION_COLUMN, page_idx, page_slot)   
-
-            # traverse 
-            while logical_rid >= MAX_RECORD_PER_PAGE_RANGE:
-                page_range.allocation_logical_rid_queue.put(logical_rid)
-                logical_page_index, logical_page_slot = page_range.get_column_location(logical_rid, INDIRECTION_COLUMN)
-                logical_rid = page_range.bufferpool.read_page_slot(page_range_idx, INDIRECTION_COLUMN, logical_page_index, logical_page_slot)
-        
-            self.deallocation_base_rid_queue.task_done()
+                self.deallocation_base_rid_queue.task_done()
+            
+            except queue.Empty:
+                break
