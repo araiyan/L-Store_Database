@@ -88,6 +88,8 @@ class Table:
         
         current_page_range:PageRange = self.page_ranges[page_range_index]
 
+        with current_page_range.page_range_lock:
+            record.columns[TIMESTAMP_COLUMN] = current_page_range.tps
         current_page_range.write_base_record(page_index, page_slot, record.columns)   
 
     def update_record(self, rid, columns) -> bool:
@@ -95,6 +97,9 @@ class Table:
         page_range_index = rid // MAX_RECORD_PER_PAGE_RANGE
         current_page_range:PageRange = self.page_ranges[page_range_index]
 
+        with current_page_range.page_range_lock:
+            columns[TIMESTAMP_COLUMN] = current_page_range.tps
+            
         update_success = current_page_range.write_tail_record(columns[RID_COLUMN], *columns)
 
         if (current_page_range.tps % (MAX_TAIL_PAGES_BEFORE_MERGING * MAX_RECORD_PER_PAGE) == 0):
@@ -139,7 +144,8 @@ class Table:
                 # Get the latest record
                 current_rid = base_record_columns[INDIRECTION_COLUMN]
                 latest_schema_encoding = base_record_columns[SCHEMA_ENCODING_COLUMN]
-                current_time_stamp = current_page_range.read_tail_record_column(current_rid, TIMESTAMP_COLUMN)
+                latest_timestamp = current_page_range.read_tail_record_column(current_rid, TIMESTAMP_COLUMN)
+                current_time_stamp = latest_timestamp
 
                 # if current rid < MAX_RECORD_PER_PAGE_RANGE, then we are at the base record
                 while current_rid >= MAX_RECORD_PER_PAGE_RANGE and latest_schema_encoding != 0 and current_time_stamp > base_merge_time:
@@ -154,7 +160,7 @@ class Table:
 
                     current_rid = indirection_column
                 
-                base_record_columns[UPDATE_TIMESTAMP_COLUMN] = int(time())
+                base_record_columns[UPDATE_TIMESTAMP_COLUMN] = latest_timestamp
                 self.bufferpool.write_page_slot(merge_request.page_range_index, UPDATE_TIMESTAMP_COLUMN, page_index, page_slot, base_record_columns[UPDATE_TIMESTAMP_COLUMN])
 
                 # consolidate base page columns

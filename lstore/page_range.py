@@ -33,12 +33,16 @@ class PageRange:
         self.tps = 0
         '''Tail page sequence number'''
 
+        self.page_range_lock = threading.Lock()
+
         self.page_range_index = page_range_index
 
     def write_base_record(self, page_index, page_slot, columns) -> bool:
         columns[INDIRECTION_COLUMN] = self.__normalize_rid(columns[RID_COLUMN])
         for (i, column) in enumerate(columns):
             self.bufferpool.write_page_slot(self.page_range_index, i, page_index, page_slot, column)
+        with self.page_range_lock:
+            self.tps += 1
         return True
     
     def copy_base_record(self, page_index, page_slot) -> list:
@@ -92,7 +96,8 @@ class PageRange:
             if (i >= NUM_HIDDEN_COLUMNS):
                 self.logical_directory[logical_rid][i - NUM_HIDDEN_COLUMNS] = (self.tail_page_index[i] * MAX_RECORD_PER_PAGE) + page_slot
 
-        self.tps += 1
+        with self.page_range_lock:
+            self.tps += 1
         return True
     
     def read_tail_record_column(self, logical_rid, column) -> int:

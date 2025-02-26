@@ -58,7 +58,7 @@ class Query:
         hidden_columns[INDIRECTION_COLUMN] = record.rid
         hidden_columns[RID_COLUMN] = record.rid
         hidden_columns[UPDATE_TIMESTAMP_COLUMN] = RECORD_NONE_VALUE
-        hidden_columns[TIMESTAMP_COLUMN] = int(time())
+        #hidden_columns[TIMESTAMP_COLUMN] = int(time())
         hidden_columns[SCHEMA_ENCODING_COLUMN] = 0
         #hidden_columns[BASE_PAGE_ID_COLUMN] = record.rid
         record.columns = hidden_columns + list(columns)
@@ -94,6 +94,7 @@ class Query:
             page_range_index, base_page_index, base_page_slot = self.table.get_base_record_location(rid)
             record_columns = [None] * self.table.num_columns
             base_schema = self.__readAndTrack(page_range_index, SCHEMA_ENCODING_COLUMN, base_page_index, base_page_slot, frames_used)
+            base_updated_timestamp = self.__readAndTrack(page_range_index, UPDATE_TIMESTAMP_COLUMN, base_page_index, base_page_slot, frames_used)
 
             base_delta_schema = projected_columns_schema ^ base_schema
             current_schema = projected_columns_schema
@@ -108,6 +109,14 @@ class Query:
             indirection_column = self.__readAndTrack(page_range_index, INDIRECTION_COLUMN, base_page_index, base_page_slot, frames_used)
             while indirection_column >= MAX_RECORD_PER_PAGE_RANGE and current_schema > 0:
                 tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(indirection_column, SCHEMA_ENCODING_COLUMN)
+                time_schema = self.table.page_ranges[page_range_index].read_tail_record_column(indirection_column, TIMESTAMP_COLUMN)
+                if (time_schema < base_updated_timestamp):
+                    for i in range(self.table.num_columns):
+                        if (current_schema >> i) & 1:
+                            record_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot, frames_used)
+                    
+                    break
+
                 for i in range(self.table.num_columns):
                     if ((current_schema >> i) & 1) and ((tail_schema >> i) & 1):
                         record_columns[i] = self.table.page_ranges[page_range_index].read_tail_record_column(indirection_column, NUM_HIDDEN_COLUMNS + i)
@@ -268,7 +277,7 @@ class Query:
 
         new_columns[INDIRECTION_COLUMN] = prev_tail_rid
         new_columns[SCHEMA_ENCODING_COLUMN] = schema_encoding
-        new_columns[TIMESTAMP_COLUMN] = int(time())
+        #new_columns[TIMESTAMP_COLUMN] = int(time())
 
         new_record = Record(rid = self.table.page_ranges[page_range_index].assign_logical_rid(), key = primary_key, columns = new_columns)
 
