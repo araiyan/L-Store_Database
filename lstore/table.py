@@ -51,7 +51,7 @@ class Table:
 
 
         # initialize bufferpool in table, not DB
-        self.bufferpool = BufferPool(self.table_path)
+        self.bufferpool = BufferPool(self.table_path, self.num_columns)
         self.page_ranges:List[PageRange] = []
     
         self.diallocation_rid_queue = queue.Queue()

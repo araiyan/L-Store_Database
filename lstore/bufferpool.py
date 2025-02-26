@@ -8,7 +8,7 @@ DB Directory: Folder
 '''
 
 
-from lstore.config import MAX_NUM_FRAME
+from lstore.config import MAX_NUM_FRAME, NUM_HIDDEN_COLUMNS
 from lstore.page import Page
 import os
 import json
@@ -94,17 +94,18 @@ class Frame:
 
 class BufferPool:
     '''Every access to pages should go through the bufferpool'''
-    def __init__(self, table_path):
+    def __init__(self, table_path, num_columns):
         self.frame_directory = dict()
+        self.num_frames = MAX_NUM_FRAME * (num_columns + NUM_HIDDEN_COLUMNS)
         '''Frame directory keeps track of page# to frame#'''
         self.frames:List[Frame] = []
-        self.available_frames_queue = Queue(MAX_NUM_FRAME)
-        self.unavailable_frames_queue = Queue(MAX_NUM_FRAME)
+        self.available_frames_queue = Queue(self.num_frames)
+        self.unavailable_frames_queue = Queue(self.num_frames)
         
         self.table_path = table_path
         self.bufferpool_lock = threading.Lock()
 
-        for i in range(MAX_NUM_FRAME):
+        for i in range(self.num_frames):
             self.frames.append(Frame())
             self.available_frames_queue.put(i)
 
