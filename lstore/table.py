@@ -67,11 +67,11 @@ class Table:
         self.index = Index(self)
         # Start the merge thread
         # Note: This thread will stop running when the main program terminates
-        self.merge_thread = threading.Thread(target=self.__merge, daemon=True)
+        self.merge_thread = threading.Thread(target=self.__merge)
         self.merge_thread.start()
 
         # start the deallocation thread
-        self.deallocation_thread = threading.Thread(target=self.__delete_worker, daemon=True)
+        self.deallocation_thread = threading.Thread(target=self.__delete_worker)
         self.deallocation_thread.start()
 
     def assign_rid_to_record(self, record: Record):
