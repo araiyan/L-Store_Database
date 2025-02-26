@@ -255,10 +255,8 @@ class Index:
                     del self.indices[i][key]
 
         #delete from value mapper
-        deleted_column = self.value_mapper[primary_key]
         del self.value_mapper[primary_key]
 
-        return deleted_column
     
     """
     # Update to value_mapper and secondary index
@@ -271,30 +269,29 @@ class Index:
         
         #update new columns in value_mapper
         for i in range(0, self.num_columns):
-            if columns[NUM_HIDDEN_COLUMNS + i] != None and self.indices[i] != None:
+            if columns[NUM_HIDDEN_COLUMNS + i] != None:
+                if self.indices[i] != None:
             
 
-                key = self.value_mapper[primary_key][i]
-                rid = list(self.indices[self.key][primary_key].keys())[0]
-                #column_value = self.value_mapper[primary_key][]
+                    key = self.value_mapper[primary_key][i]
+                    rid = list(self.indices[self.key][primary_key].keys())[0]
+                    #column_value = self.value_mapper[primary_key][]
 
-                #if changed value is in key column, transfer to new mapping to new key and delete old key
-                if self.indices[i].get(columns[i + NUM_HIDDEN_COLUMNS]):
+                    #if changed value is in key column, transfer to new mapping to new key and delete old key
+                    if self.indices[i].get(columns[i + NUM_HIDDEN_COLUMNS]):
 
-                    self.insert_to_index(i, columns[i + NUM_HIDDEN_COLUMNS], rid)
-                    del self.indices[i][key][rid]
+                        self.insert_to_index(i, columns[i + NUM_HIDDEN_COLUMNS], rid)
+                        del self.indices[i][key][rid]
 
-                else:
-                    #self.indices[i][columns[i + NUM_HIDDEN_COLUMNS]] = self.indices[i][key]
-                    self.insert_to_index(i, columns[i + NUM_HIDDEN_COLUMNS], rid)
-                    del self.indices[i][key][rid]
-                    if self.indices[i][key] == {}:
+                    else:
+                        #self.indices[i][columns[i + NUM_HIDDEN_COLUMNS]] = self.indices[i][key]
+                        self.insert_to_index(i, columns[i + NUM_HIDDEN_COLUMNS], rid)
+                        del self.indices[i][key][rid]
+                        if self.indices[i][key] == {}:
                     
-                        del self.indices[i][key]
+                            del self.indices[i][key]
 
-        
-
-            self.value_mapper[primary_key][i] = columns[i + NUM_HIDDEN_COLUMNS]
+                self.value_mapper[primary_key][i] = columns[i + NUM_HIDDEN_COLUMNS]
 
         return True
     
@@ -321,11 +318,11 @@ class Index:
     # instead of rid when given primary/secondary key and its column number
     """
     def get(self, key_column_number, value_column_number, key):
-        self.__search_value_mapper(key_column_number, value_column_number, key, key)
+        return self.__search_value_mapper(key_column_number, value_column_number, key, key)
 
 
     def get_range(self, key_column_number, value_column_number, begin, end):
-        self.__search_value_mapper(key_column_number, value_column_number, begin, end)
+        return self.__search_value_mapper(key_column_number, value_column_number, begin, end)
 
 
     def __search_value_mapper(self, key_column_number, value_column_number, begin, end):
