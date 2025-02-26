@@ -155,26 +155,26 @@ class Query:
                     
                     # Reading a specific version of the record
                     else:
-                        base_timestamp = self.__readAndTrack(page_range_index, TIMESTAMP_COLUMN, base_page_index, base_page_slot)
+                        base_timestamp = self.__readAndTrack(page_range_index, TIMESTAMP_COLUMN, base_page_index, base_page_slot, frames_used)
                         current_version = 0
                         temp_tail_rid = current_tail_rid
                         
                         # Traverse chain until we find the requested version
                         while temp_tail_rid != rid and temp_tail_rid is not None:
-                            tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(page_range_index, temp_tail_rid, SCHEMA_ENCODING_COLUMN)
-                            tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(page_range_index, temp_tail_rid, TIMESTAMP_COLUMN)
+                            tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, SCHEMA_ENCODING_COLUMN)
+                            tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, TIMESTAMP_COLUMN)
                             
                             if ((tail_schema >> i) & 1 and tail_timestamp >= base_timestamp):
                                 current_version += 1
                                 if current_version == relative_version:
-                                    record_columns[i] = self.table.page_ranges[page_range_index].read_tail_record_column(page_range_index, temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
+                                    record_columns[i] = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
                                     break
                             
-                            temp_tail_rid = self.table.page_ranges[page_range_index].read_tail_record_column(page_range_index, temp_tail_rid, INDIRECTION_COLUMN)
+                            temp_tail_rid = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, INDIRECTION_COLUMN)
                         
                         # If we didn't find the requested version, use base record
                         if temp_tail_rid == rid or temp_tail_rid is None or current_version < relative_version:
-                            record_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
+                            record_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot, frames_used)
                     
             if(record_columns[self.table.key] is None): 
                 record_columns[self.table.key] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + self.table.key, base_page_index, base_page_slot, frames_used)
