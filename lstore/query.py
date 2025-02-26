@@ -2,6 +2,7 @@ from lstore.table import Table, Record
 from lstore.config import *
 
 from time import time
+from queue import Queue
 
 class Query:
     """
@@ -96,61 +97,61 @@ class Query:
         rid_list = self.table.index.locate(search_key_index, search_key)
         if not rid_list:
             raise ValueError("No records found with the given key")
-        
+
         record_objs = []
-        frames_used = set()     # Instead of just unpinning the frames wheneever we read from them, let's keep track of them and unpin them all at the end of the query
-        
+        frames_used = Queue()  # Replaced set with a queue for FIFO processing
+
         # Convert the projected_columns_index to a schema encoding
         projected_columns_schema = sum(1 << i for i, val in enumerate(projected_columns_index) if val == 1)
-        
+
         for rid in rid_list:
             page_range_index, base_page_index, base_page_slot = self.table.get_base_record_location(rid)
             record_columns = [None] * self.table.num_columns
             base_schema = self.__readAndTrack(page_range_index, SCHEMA_ENCODING_COLUMN, base_page_index, base_page_slot, frames_used)
-            
+
             # No changes made, read directly from base record
-            if(base_schema == 0):
+            if base_schema == 0:
                 for i in range(self.table.num_columns):
                     if (projected_columns_schema >> i) & 1:
                         record_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot, frames_used)
-                
+            
             else:
                 current_tail_rid = self.__readAndTrack(page_range_index, INDIRECTION_COLUMN, base_page_index, base_page_slot, frames_used)
-                
+
                 for i in range(self.table.num_columns):
                     if not ((projected_columns_schema >> i) & 1):
                         continue
-                        
+
                     if not ((base_schema >> i) & 1):
                         record_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot, frames_used)
                         continue
-                    
+
                     # Reading the latest version of the record
                     if relative_version == 0:
                         tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(current_tail_rid, SCHEMA_ENCODING_COLUMN)
-                        
+
                         if (tail_schema >> i) & 1:
                             record_columns[i] = self.table.page_ranges[page_range_index].read_tail_record_column(current_tail_rid, NUM_HIDDEN_COLUMNS + i)
                         
                         else:
                             temp_tail_rid = current_tail_rid
                             schema_cache = {current_tail_rid: tail_schema}
-                            
+
                             # Traverse chain until we find the latest tail record with the desired column from schema
                             while True:
                                 prev_tail_rid = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, INDIRECTION_COLUMN)
-                                
-                                if(prev_tail_rid == rid or prev_tail_rid is None):
+
+                                if prev_tail_rid == rid or prev_tail_rid is None:
                                     record_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot, frames_used)
                                     break
-                                
-                                if(prev_tail_rid not in schema_cache):
+
+                                if prev_tail_rid not in schema_cache:
                                     schema_cache[prev_tail_rid] = self.table.page_ranges[page_range_index].read_tail_record_column(prev_tail_rid, SCHEMA_ENCODING_COLUMN)
-                                
+
                                 if (schema_cache[prev_tail_rid] >> i) & 1:
                                     record_columns[i] = self.table.page_ranges[page_range_index].read_tail_record_column(prev_tail_rid, NUM_HIDDEN_COLUMNS + i)
                                     break
-                                
+
                                 temp_tail_rid = prev_tail_rid
                     
                     # Reading a specific version of the record
@@ -158,34 +159,36 @@ class Query:
                         base_timestamp = self.__readAndTrack(page_range_index, TIMESTAMP_COLUMN, base_page_index, base_page_slot, frames_used)
                         current_version = 0
                         temp_tail_rid = current_tail_rid
-                        
+
                         # Traverse chain until we find the requested version
                         while temp_tail_rid != rid and temp_tail_rid is not None:
                             tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, SCHEMA_ENCODING_COLUMN)
                             tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, TIMESTAMP_COLUMN)
-                            
+
                             if ((tail_schema >> i) & 1 and tail_timestamp >= base_timestamp):
                                 current_version += 1
                                 if current_version == relative_version:
                                     record_columns[i] = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, NUM_HIDDEN_COLUMNS + i)
                                     break
-                            
+
                             temp_tail_rid = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, INDIRECTION_COLUMN)
-                        
+
                         # If we didn't find the requested version, use base record
                         if temp_tail_rid == rid or temp_tail_rid is None or current_version < relative_version:
                             record_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot, frames_used)
-                    
-            if(record_columns[self.table.key] is None): 
+
+            if record_columns[self.table.key] is None:
                 record_columns[self.table.key] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + self.table.key, base_page_index, base_page_slot, frames_used)
-            
+
             record_objs.append(Record(rid, record_columns[self.table.key], record_columns))
-        
-        # Mark all frames as used after processing
-        for frame_num in frames_used:
+
+        # Mark all frames as used after processing, using FIFO order
+        while not frames_used.empty():
+            frame_num = frames_used.get()
             self.table.bufferpool.mark_frame_used(frame_num)
 
         return record_objs
+
 
     """
     # Update a record with specified key and columns
@@ -367,5 +370,6 @@ class Query:
     
     def __readAndTrack(self, page_range_index, column, page_index, slot, frames_used):
         value = self.table.bufferpool.read_page_slot(page_range_index, column, page_index, slot)
-        frames_used.add(self.table.bufferpool.get_page_frame_num(page_range_index, column, page_index))
+        frame_num = self.table.bufferpool.get_page_frame_num(page_range_index, column, page_index)
+        frames_used.put(frame_num)
         return value
