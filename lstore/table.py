@@ -68,7 +68,7 @@ class Table:
         # Start the merge thread
         # Note: This thread will stop running when the main program terminates
         self.merge_thread = threading.Thread(target=self.__merge, daemon=True)
-        # self.merge_thread.start()
+        self.merge_thread.start()
 
         # start the deallocation thread
         self.deallocation_thread = threading.Thread(target=self.__delete_worker, daemon=True)
