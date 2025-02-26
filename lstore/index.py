@@ -101,7 +101,7 @@ class Index:
         if self.indices[column_number] == None:
 
             self.indices[column_number] = OOBTree()
-
+            frames_used = []
             # go through value mapper to create new index
             all_base_rids = self.grab_all()
 
@@ -112,7 +112,7 @@ class Index:
 
                 indir_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
                 frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, INDIRECTION_COLUMN, page_index)
-                self.table.bufferpool.mark_frame_used(frame_num)
+                frames_used.append(frame_num)
 
 
                 """ Referencing latest tail page search from sum version """
@@ -120,13 +120,13 @@ class Index:
 
                     column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index, page_slot)
                     frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index)
-                    self.table.bufferpool.mark_frame_used(frame_num)
+                    frames_used.append(frame_num)
 
                 else: #if updates
 
                     base_timestamp = self.table.bufferpool.read_page_slot(page_range_index, TIMESTAMP_COLUMN, page_index, page_slot)
                     frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, TIMESTAMP_COLUMN, page_index)
-                    self.table.bufferpool.mark_frame_used(frame_num)
+                    frames_used.append(frame_num)
 
                     tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, SCHEMA_ENCODING_COLUMN)
                     tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, TIMESTAMP_COLUMN)
@@ -138,18 +138,19 @@ class Index:
 
                         column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, tail_page_index, tail_slot)
                         frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index)
-                        self.table.bufferpool.mark_frame_used(frame_num)
-
-                        #column_value = self.__readAndMarkSlot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, tail_page_index, tail_slot)
+                        frames_used.append(frame_num)
 
                     else: # if merged page is latest updated
                         column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index, page_slot)
                         frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index)
-                        self.table.bufferpool.mark_frame_used(frame_num)
+                        frames_used.append(frame_num)
 
 
                 #insert {primary_index: {rid: True}} into primary index BTree
                 self.insert_to_index(column_number, column_value, rid)
+
+                for frame in frames_used:
+                    self.table.bufferpool.mark_frame_used(frame)
 
             return True
         else:
@@ -255,10 +256,8 @@ class Index:
                     del self.indices[i][key]
 
         #delete from value mapper
-        deleted_column = self.value_mapper[primary_key]
         del self.value_mapper[primary_key]
 
-        return deleted_column
     
     """
     # Update to value_mapper and secondary index
@@ -271,30 +270,29 @@ class Index:
         
         #update new columns in value_mapper
         for i in range(0, self.num_columns):
-            if columns[NUM_HIDDEN_COLUMNS + i] != None and self.indices[i] != None:
+            if columns[NUM_HIDDEN_COLUMNS + i] != None:
+                if self.indices[i] != None:
             
 
-                key = self.value_mapper[primary_key][i]
-                rid = list(self.indices[self.key][primary_key].keys())[0]
-                #column_value = self.value_mapper[primary_key][]
+                    key = self.value_mapper[primary_key][i]
+                    rid = list(self.indices[self.key][primary_key].keys())[0]
+                    #column_value = self.value_mapper[primary_key][]
 
-                #if changed value is in key column, transfer to new mapping to new key and delete old key
-                if self.indices[i].get(columns[i + NUM_HIDDEN_COLUMNS]):
+                    #if changed value is in key column, transfer to new mapping to new key and delete old key
+                    if self.indices[i].get(columns[i + NUM_HIDDEN_COLUMNS]):
 
-                    self.insert_to_index(i, columns[i + NUM_HIDDEN_COLUMNS], rid)
-                    del self.indices[i][key][rid]
+                        self.insert_to_index(i, columns[i + NUM_HIDDEN_COLUMNS], rid)
+                        del self.indices[i][key][rid]
 
-                else:
-                    #self.indices[i][columns[i + NUM_HIDDEN_COLUMNS]] = self.indices[i][key]
-                    self.insert_to_index(i, columns[i + NUM_HIDDEN_COLUMNS], rid)
-                    del self.indices[i][key][rid]
-                    if self.indices[i][key] == {}:
+                    else:
+                        #self.indices[i][columns[i + NUM_HIDDEN_COLUMNS]] = self.indices[i][key]
+                        self.insert_to_index(i, columns[i + NUM_HIDDEN_COLUMNS], rid)
+                        del self.indices[i][key][rid]
+                        if self.indices[i][key] == {}:
                     
-                        del self.indices[i][key]
+                            del self.indices[i][key]
 
-        
-
-            self.value_mapper[primary_key][i] = columns[i + NUM_HIDDEN_COLUMNS]
+                self.value_mapper[primary_key][i] = columns[i + NUM_HIDDEN_COLUMNS]
 
         return True
     
@@ -321,11 +319,11 @@ class Index:
     # instead of rid when given primary/secondary key and its column number
     """
     def get(self, key_column_number, value_column_number, key):
-        self.__search_value_mapper(key_column_number, value_column_number, key, key)
+        return self.__search_value_mapper(key_column_number, value_column_number, key, key)
 
 
     def get_range(self, key_column_number, value_column_number, begin, end):
-        self.__search_value_mapper(key_column_number, value_column_number, begin, end)
+        return self.__search_value_mapper(key_column_number, value_column_number, begin, end)
 
 
     def __search_value_mapper(self, key_column_number, value_column_number, begin, end):
@@ -349,17 +347,18 @@ class Index:
 
         #get base rid for every record with no duplicates
         all_base_rids = self.table.grab_all_base_rids()
-
+        frames_used = []
         #read through bufferpool to get primary index
         for rid in all_base_rids:
             page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
             primary_key = self.table.bufferpool.read_page_slot(page_range_index, self.key + NUM_HIDDEN_COLUMNS, page_index, page_slot)
             frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, self.key + NUM_HIDDEN_COLUMNS, page_index)
-            if frame_num:
-                self.table.bufferpool.mark_frame_used(frame_num)
-
+            frames_used.append(frame_num)
             #insert {primary_index: {rid: True}} into primary index BTree
             self.insert_to_index(self.key, primary_key, rid)
+        
+        for frame in frames_used:
+            self.table.bufferpool.mark_frame_used(frame)
     
     # call "index:": self.index.serialize() from table
     # pickle every index BTree and then store them in base64

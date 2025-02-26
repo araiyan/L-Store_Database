@@ -76,7 +76,6 @@ class TestIndexMethods(unittest.TestCase):
         #query.table.index.update_all_indices(92106430, [0,0,0,0,0, 0, None, 1, None,None,None])
         print(dict(grades_table.index.indices[1][123456789]))
         query.table.index.delete_from_all_indices(92106430)
-        
 
         grades_table.index.create_index(2)
         print(f"create secondary index after updates: {query.table.index.locate(2, 999999)}")
