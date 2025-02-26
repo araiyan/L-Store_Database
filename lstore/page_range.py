@@ -1,3 +1,4 @@
+import threading
 from lstore.config import *
 from lstore.bufferpool import BufferPool
 import json
@@ -6,7 +7,8 @@ import queue
 
 class MergeRequest:
     '''Contains information about the tail pages to be merged'''
-    def __init__(self, page_range_index):
+    def __init__(self, page_range_index, turn_off=False):
+        self.turn_off = turn_off
         self.page_range_index = page_range_index
 
 class PageRange:
@@ -15,9 +17,8 @@ class PageRange:
     Indirection column of a base page would contain the logical_rid of its corresponding tail record
     '''
 
-    def __init__(self, page_range_index, num_columns, bufferpool:BufferPool, merge_queue:queue.Queue):
+    def __init__(self, page_range_index, num_columns, bufferpool:BufferPool):
         self.bufferpool = bufferpool
-        self.merge_queue = merge_queue
         self.logical_directory = {}
         '''Maps logical rid's to physical locations in page for each column (except hidden columns)'''
         self.logical_rid_index = MAX_RECORD_PER_PAGE_RANGE
@@ -32,12 +33,16 @@ class PageRange:
         self.tps = 0
         '''Tail page sequence number'''
 
+        self.page_range_lock = threading.Lock()
+
         self.page_range_index = page_range_index
 
     def write_base_record(self, page_index, page_slot, columns) -> bool:
         columns[INDIRECTION_COLUMN] = self.__normalize_rid(columns[RID_COLUMN])
         for (i, column) in enumerate(columns):
             self.bufferpool.write_page_slot(self.page_range_index, i, page_index, page_slot, column)
+        with self.page_range_lock:
+            self.tps += 1
         return True
     
     def copy_base_record(self, page_index, page_slot) -> list:
@@ -91,10 +96,8 @@ class PageRange:
             if (i >= NUM_HIDDEN_COLUMNS):
                 self.logical_directory[logical_rid][i - NUM_HIDDEN_COLUMNS] = (self.tail_page_index[i] * MAX_RECORD_PER_PAGE) + page_slot
 
-        self.tps += 1
-        if (self.tps % (MAX_TAIL_PAGES_BEFORE_MERGING * MAX_RECORD_PER_PAGE) == 0):
-            self.merge_queue.put(MergeRequest(self.page_range_index))
-
+        with self.page_range_lock:
+            self.tps += 1
         return True
     
     def read_tail_record_column(self, logical_rid, column) -> int:
