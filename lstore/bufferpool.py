@@ -161,9 +161,9 @@ class BufferPool:
                 current_frame:Frame = self.__load_new_frame(page_disk_path)
                 return current_frame.page.get(slot_index)
 
-        current_frame:Frame = self.frames[page_frame_num]
-        current_frame.increment_pin()
-        return current_frame.page.get(slot_index)
+            current_frame:Frame = self.frames[page_frame_num]
+            current_frame.increment_pin()
+            return current_frame.page.get(slot_index)
     
     def write_page_slot(self, page_range_index, record_column, page_index, slot_index, value) -> bool:
         '''Writes a value to a page slot'''
