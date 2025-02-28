@@ -117,7 +117,7 @@ class Query:
             base_timestamp = self.__readAndMarkSlot(page_range_index, TIMESTAMP_COLUMN, base_page_index, base_page_slot)
             current_tail_rid = self.__readAndMarkSlot(page_range_index, INDIRECTION_COLUMN, base_page_index, base_page_slot)
 
-            if current_tail_rid == rid:
+            if current_tail_rid < MAX_RECORD_PER_PAGE_RANGE:
                 
                 # Current RID = base RID, read all columns from the base page
                 for i in range(self.table.num_columns):
@@ -136,7 +136,7 @@ class Query:
                         temp_tail_rid = current_tail_rid
                         found_value = False
                         
-                        while temp_tail_rid != rid and current_version <= relative_version:
+                        while temp_tail_rid >= MAX_RECORD_PER_PAGE_RANGE and current_version <= relative_version:
                             tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, SCHEMA_ENCODING_COLUMN)
                             tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(temp_tail_rid, TIMESTAMP_COLUMN)
                             
