@@ -294,7 +294,8 @@ class Query:
         self.table.bufferpool.mark_frame_used(schemaFrame_num)
 
         # Update successful
-        self.table.index.update_all_indices(primary_key, new_columns)
+        prev_latest_columns = self.__get_prev_columns(rid_location[0], *columns)
+        self.table.index.update_all_indices(primary_key, new_columns, prev_latest_columns)
         # print("Update Successful\n")
 
         return True
@@ -421,3 +422,39 @@ class Query:
         frame_num = self.table.bufferpool.get_page_frame_num(page_range_index, column, page_index)
         frames_used.put(frame_num)
         return value
+    
+    def __get_prev_columns(self, rid, *columns):
+        prev_columns = [None] * self.table.num_columns
+        frames_used = Queue()
+
+        page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
+
+        indir_rid = self.__readAndTrack(page_range_index, INDIRECTION_COLUMN, page_index, page_slot, frames_used)
+        base_timestamp = self.__readAndTrack(page_range_index, TIMESTAMP_COLUMN, page_index, page_slot, frames_used)
+
+
+        for i in range(self.table.num_columns):
+            if columns[i] != None:
+                prev_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, page_index, page_slot, frames_used)
+
+                if indir_rid == (rid % MAX_RECORD_PER_PAGE_RANGE) : # if no updates
+                    prev_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, page_index, page_slot, frames_used)
+
+                else:
+                    tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, SCHEMA_ENCODING_COLUMN)
+                    tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, TIMESTAMP_COLUMN)
+
+                    # if the tail page for column is latest updated 
+                    if (tail_schema >> i) & 1 and tail_timestamp >= base_timestamp:
+
+                        tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(indir_rid, i +  NUM_HIDDEN_COLUMNS)
+                        prev_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, tail_page_index, tail_slot, frames_used)
+
+                    else: 
+                        prev_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, page_index, page_slot, frames_used)
+
+        while not frames_used.empty():
+            frame_num = frames_used.get()
+            self.table.bufferpool.mark_frame_used(frame_num)
+
+        return prev_columns
