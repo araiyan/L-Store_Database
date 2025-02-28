@@ -184,6 +184,9 @@ class Query:
         
         new_columns = [None] * self.table.total_num_columns
         schema_encoding = 0
+
+        #for update index
+        prev_latest_columns = self.__get_prev_columns(rid_location[0], *columns)
         
         for i, value in enumerate(columns):
 
@@ -224,7 +227,6 @@ class Query:
         self.table.bufferpool.mark_frame_used(schemaFrame_num)
 
         # Update successful
-        prev_latest_columns = self.__get_prev_columns(rid_location[0], *columns)
         self.table.index.update_all_indices(primary_key, new_columns, prev_latest_columns)
         # print("Update Successful\n")
 
@@ -363,17 +365,16 @@ class Query:
         base_timestamp = self.__readAndTrack(page_range_index, TIMESTAMP_COLUMN, page_index, page_slot, frames_used)
 
 
+        tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, SCHEMA_ENCODING_COLUMN)
+        tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, TIMESTAMP_COLUMN)
+
         for i in range(self.table.num_columns):
             if columns[i] != None:
-                prev_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, page_index, page_slot, frames_used)
 
                 if indir_rid == (rid % MAX_RECORD_PER_PAGE_RANGE) : # if no updates
                     prev_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, page_index, page_slot, frames_used)
 
                 else:
-                    tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, SCHEMA_ENCODING_COLUMN)
-                    tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, TIMESTAMP_COLUMN)
-
                     # if the tail page for column is latest updated 
                     if (tail_schema >> i) & 1 and tail_timestamp >= base_timestamp:
 
@@ -386,5 +387,5 @@ class Query:
         while not frames_used.empty():
             frame_num = frames_used.get()
             self.table.bufferpool.mark_frame_used(frame_num)
-
+            
         return prev_columns
