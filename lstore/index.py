@@ -2,11 +2,9 @@
 A data strucutre holding indices for various columns of a table. Key column should be indexd by default, other columns can be indexed through this object. Indices are usually B-Trees, but other data structures can be used as well.
 """
 import base64
-import re
 from lstore.config import *
 from BTrees.OOBTree import OOBTree
 import pickle
-import os
 
 class Index:
 
@@ -18,9 +16,10 @@ class Index:
         self.key = table.key
         self.table = table
 
-        self.create_index(self.key)
+        has_stored_index  = self.__generate_primary_index()
 
-        self.__generate_primary_index()
+        if not has_stored_index:
+            self.create_index(self.key)
 
 
     """
@@ -43,7 +42,6 @@ class Index:
 
     # create secondary index through page range and bufferpool    
     def create_index(self, column_number):
-        #deserialize value_mapper if lost
 
         if column_number >= self.table.num_columns:
             return False
@@ -173,25 +171,24 @@ class Index:
     """
     # Remove element associated with primary key from value_mapper, primary and secondary index
     """
-    def delete_from_all_indices(self, primary_key):
+    def delete_from_all_indices(self, primary_key, prev_columns):
 
         if not self.indices[self.key].get(primary_key):
             return False
         
+        rid = list(self.indices[self.key][primary_key].keys())[0]
 
         # if we have secondary index, delete from those too
         for i in range(self.num_columns):
 
-            if self.indices[i] != None and i != self.key:
+            if (self.indices[i] != None) and (prev_columns[i] != None):
 
-                key = self.value_mapper[primary_key][i]
-                rid = list(self.indices[self.key][primary_key].keys())[0]
+                del self.indices[i][prev_columns[i]][rid]
 
-                del self.indices[i][key][rid]
+                if self.indices[i][prev_columns[i]] == {}:
+                    del self.indices[i][prev_columns[i]]
 
-                if self.indices[i][key] == {}:
-                    del self.indices[i][key]
-
+        return True
     
     """
     # Update to value_mapper and secondary index
@@ -235,17 +232,18 @@ class Index:
             for rid in rids:
                 all_rid.append(rid)
         return all_rid
-
-    
         
     # use this when open db
     def __generate_primary_index(self):
-        #initialize a BTree
-        self.indices[self.key] = OOBTree()
 
         #get base rid for every record with no duplicates
         all_base_rids = self.table.grab_all_base_rids()
+        if not all_base_rids:
+            return False
+        
+        self.indices[self.key] = OOBTree()
         frames_used = []
+        
         #read through bufferpool to get primary index
         for rid in all_base_rids:
             page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
@@ -257,6 +255,8 @@ class Index:
         
         for frame in frames_used:
             self.table.bufferpool.mark_frame_used(frame)
+
+        return True
     
     # call "index:": self.index.serialize() from table
     # pickle every index BTree and then store them in base64

@@ -32,8 +32,16 @@ class Query:
             return False  # Record does not exist
 
         self.table.deallocation_base_rid_queue.put(base_rid[0])
-        self.table.index.delete_from_all_indices(primary_key)
 
+
+        for i in range(self.table.num_columns):
+            if self.table.index.indices[i] != None:
+                prev_columns, frames = self.__get_prev_columns(base_rid[0], *self.table.index.indices)
+
+        self.table.index.delete_from_all_indices(primary_key, prev_columns)
+        while not frames.empty():
+            frame_num = frames.get()
+            self.table.bufferpool.mark_frame_used(frame_num)
         # Deletion successful
         return True
 
@@ -186,7 +194,7 @@ class Query:
         schema_encoding = 0
 
         #for update index
-        prev_latest_columns = self.__get_prev_columns(rid_location[0], *columns)
+        prev_columns, frames = self.__get_prev_columns(rid_location[0], *columns)
         
         for i, value in enumerate(columns):
 
@@ -227,7 +235,10 @@ class Query:
         self.table.bufferpool.mark_frame_used(schemaFrame_num)
 
         # Update successful
-        self.table.index.update_all_indices(primary_key, new_columns, prev_latest_columns)
+        self.table.index.update_all_indices(primary_key, new_columns, prev_columns)
+        while not frames.empty():
+            frame_num = frames.get()
+            self.table.bufferpool.mark_frame_used(frame_num)
         # print("Update Successful\n")
 
         return True
@@ -384,8 +395,5 @@ class Query:
                     else: 
                         prev_columns[i] = self.__readAndTrack(page_range_index, NUM_HIDDEN_COLUMNS + i, page_index, page_slot, frames_used)
 
-        while not frames_used.empty():
-            frame_num = frames_used.get()
-            self.table.bufferpool.mark_frame_used(frame_num)
-            
-        return prev_columns
+        # return prev latest column with queue of frame used to mark frames at the end
+        return (prev_columns, frames_used)
