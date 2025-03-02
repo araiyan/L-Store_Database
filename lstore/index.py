@@ -49,56 +49,75 @@ class Index:
         if self.indices[column_number] == None:
 
             self.indices[column_number] = OOBTree()
-            frames_used = []
             # go through value mapper to create new index
             all_base_rids = self.grab_all()
 
+            column_value =  None
+            tail_timestamp = 0
+            tail = False
             #read through bufferpool to get latest tail record
             for rid in all_base_rids:
-
+   
                 page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
 
                 indir_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
                 frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, INDIRECTION_COLUMN, page_index)
-                frames_used.append(frame_num)
+                self.table.bufferpool.mark_frame_used(frame_num)
 
+                base_schema = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, page_index, page_slot)
+                frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, SCHEMA_ENCODING_COLUMN, page_index)
+                self.table.bufferpool.mark_frame_used(frame_num)
 
                 """ Referencing latest tail page search from sum version """
                 if indir_rid == (rid % MAX_RECORD_PER_PAGE_RANGE) : # if no updates
 
                     column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index, page_slot)
                     frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index)
-                    frames_used.append(frame_num)
+                    self.table.bufferpool.mark_frame_used(frame_num)
 
                 else: #if updates
 
                     base_timestamp = self.table.bufferpool.read_page_slot(page_range_index, TIMESTAMP_COLUMN, page_index, page_slot)
                     frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, TIMESTAMP_COLUMN, page_index)
-                    frames_used.append(frame_num)
+                    self.table.bufferpool.mark_frame_used(frame_num)
 
-                    tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, SCHEMA_ENCODING_COLUMN)
-                    tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, TIMESTAMP_COLUMN)
+                    if(base_schema >> column_number) & 1:
+
+                        while True:
+                            try:
+                                tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(indir_rid, column_number + NUM_HIDDEN_COLUMNS)
+                                tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, TIMESTAMP_COLUMN)
+                                tail = True
+                                break
+                            except:
+
+                                prev_rid = indir_rid
+                                indir_rid = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, INDIRECTION_COLUMN)
+
+                                if indir_rid == rid: #edge case where latest updated column value is in the first tail record inserted
+                                    least_updated_tail_rid = self.table.page_ranges[page_range_index].read_tail_record_column(prev_rid, RID_COLUMN)
+                                    tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(least_updated_tail_rid, column_number + NUM_HIDDEN_COLUMNS)
+                                    tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(least_updated_tail_rid, TIMESTAMP_COLUMN)
+                                    tail = True
+                                    break
+
+                                if  indir_rid in self.table.allocation_base_rid_queue.queue or indir_rid in self.table.deallocation_base_rid_queue.queue:
+                                    break
+
 
                     # if the tail page for column is latest updated 
-                    if (tail_schema >> column_number) & 1 and tail_timestamp >= base_timestamp:
-                    
-                        tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(indir_rid, column_number +  NUM_HIDDEN_COLUMNS)
-
+                    if (base_schema >> column_number) & 1 and tail_timestamp >= base_timestamp and tail:
                         column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, tail_page_index, tail_slot)
                         frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index)
-                        frames_used.append(frame_num)
+                        self.table.bufferpool.mark_frame_used(frame_num)
 
                     else: # if merged page is latest updated
                         column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index, page_slot)
                         frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index)
-                        frames_used.append(frame_num)
-
-
+                        self.table.bufferpool.mark_frame_used(frame_num)
+                
                 #insert {primary_index: {rid: True}} into primary index BTree
                 self.insert_to_index(column_number, column_value, rid)
-
-                for frame in frames_used:
-                    self.table.bufferpool.mark_frame_used(frame)
 
             return True
         else:
@@ -146,8 +165,10 @@ class Index:
         
         if (not index.get(column_value)):
             index[column_value] = {}
-
+        
         index[column_value][rid] = True
+
+        return True
     
     """
     # Takes a record and insert it into value_mapper, primary and secondary index
