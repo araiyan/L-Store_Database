@@ -57,7 +57,7 @@ class Index:
             tail = False
             #read through bufferpool to get latest tail record
             for rid in all_base_rids:
-   
+
                 page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
 
                 indir_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
