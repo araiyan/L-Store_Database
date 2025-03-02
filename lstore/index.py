@@ -101,10 +101,6 @@ class Index:
                                     tail = True
                                     break
 
-                                if  indir_rid in self.table.allocation_base_rid_queue.queue or indir_rid in self.table.deallocation_base_rid_queue.queue:
-                                    break
-
-
                     # if the tail page for column is latest updated 
                     if (base_schema >> column_number) & 1 and tail_timestamp >= base_timestamp and tail:
                         column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, tail_page_index, tail_slot)

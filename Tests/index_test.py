@@ -118,17 +118,17 @@ class TestIndexMethods(unittest.TestCase):
 
         print(f"locating 202 on column 2{query.table.index.locate(2, 202)}, should be none")
 
-        query.delete(92106431)
+        # query.delete(92106431)
 
         print(f"locating 101 on column 1{query.table.index.locate(1, 101)}")
         print(f"locating 202 on column 2{query.table.index.locate(2, 204)}")
 
         #doing sum and select after deletion throws errors
-        #record = query.sum(92106431, 92106431, 1)
-        #print(record)
+        record = query.sum(92106431, 92106431, 1)
+        print(record)
 
-        #record = query.select(92106431, 0, [1, 1, 1, 1, 1])[0]
-        #print(record)
+        record = query.select(92106431, 0, [1, 1, 1, 1, 1])[0]
+        print(record)
 
 
         # throws error bc its already deleted

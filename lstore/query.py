@@ -286,7 +286,7 @@ class Query:
             found_value = False
             
             current_version_rid = current_tail_rid
-            while current_version_rid != (rid % MAX_RECORD_PER_PAGE_RANGE) and current_version <= relative_version:
+            while current_version_rid >= MAX_RECORD_PER_PAGE_RANGE and current_version <= relative_version:
                 # Read schema and timestamp from the tail record
                 tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(current_version_rid, SCHEMA_ENCODING_COLUMN)
                 tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(current_version_rid, TIMESTAMP_COLUMN)
