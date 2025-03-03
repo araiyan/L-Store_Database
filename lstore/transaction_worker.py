@@ -67,3 +67,5 @@ class TransactionWorker:
                 self.stats.append(False)
                 self.transaction_errors[transaction_id] = str(e)
                 self.lock_manager.release_all_locks(transaction_id)
+
+        self.result = len(list(filter(lambda x: x, self.stats)))
