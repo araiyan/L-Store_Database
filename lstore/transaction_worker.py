@@ -9,16 +9,14 @@ class TransactionWorker:
     """
     # Creates a transaction worker object.
     """
-    def __init__(self, transactions = None, lock_manager = None, deadlock_detection = True):
+    def __init__(self, transactions = None, lock_manager = None):
         self.stats = []
         self.transactions = transactions if transactions is not None else []
         self.result = 0
         self.worker_thread = None
         self.lock_manager = lock_manager if lock_manager is not None else LockManager()        
-        self.deadlock_detection = deadlock_detection
         self.lock = threading.Lock()
         self.transaction_errors = {}
-        self.timeout = 1000000              # idk what timeout value should be yet
 
 
     """
