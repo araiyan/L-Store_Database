@@ -95,3 +95,33 @@ class LockManager:
             self.condition.notify_all()
 
             self.transaction_states[transaction_id] = 'shrinking'
+
+    def upgrade_lock(self, transaction_id, record_id, current_lock_type, new_lock_type):
+        """
+        Upgrades a IS or IX lock to its respective S or X lock.
+        """
+        with self.condition:
+            if current_lock_type == 'IX' and new_lock_type == 'X':
+                # Wait until no other transaction holds a conflicting lock
+                while self.lock_table[record_id]['S'] or self.lock_table[record_id]['X'] or self.lock_table[record_id]['IS'].count > 0:
+                    self.condition.wait()
+
+                if not (transaction_id in self.lock_table[record_id]['IX']):
+                    raise ValueError("Transaction does not hold an IX lock")
+                    
+                self.lock_table[record_id]['IX'].count_down()
+                self.lock_table[record_id]['X'].add(transaction_id)
+            elif current_lock_type == 'IS' and new_lock_type == 'S':
+                # Wait until no other transaction holds an exclusive lock
+                while self.lock_table[record_id]['X']:
+                    self.condition.wait()
+
+                if not (transaction_id in self.lock_table[record_id]['IS']):
+                    raise ValueError("Transaction does not hold an IS lock")
+                
+                self.lock_table[record_id]['IS'].count_down()
+                self.lock_table[record_id]['S'].add(transaction_id)
+            else:
+                raise ValueError("Invalid lock upgrade")
+            self.condition.notify_all()
+
