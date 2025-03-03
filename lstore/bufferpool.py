@@ -10,6 +10,7 @@ DB Directory: Folder
 
 from lstore.config import MAX_NUM_FRAME, NUM_HIDDEN_COLUMNS
 from lstore.page import Page
+from lstore.lock import Latch
 import os
 import json
 import threading
@@ -20,13 +21,12 @@ from typing import List, Union
 class Frame:
     '''Each frame inside the bufferpool'''
     def __init__(self):
-        self.pin:int = 0
+        self.pin = Latch()
         self.page:Page = None
         self.page_path = None
         self.dirty:bool = False
         '''If the Dirty bit is true we need to write to disk before discarding the frame'''
 
-        self._pin_lock = threading.Lock()
         self._write_lock = threading.Lock()
 
     def load_page(self, page_path:str):
@@ -48,7 +48,7 @@ class Frame:
         self._write_lock.release()
 
     def unload_page(self):
-        if (self.pin > 0):
+        if (self.pin.count > 0):
             raise MemoryError("Cannot unload a page thats being used by processes")
         
         self._write_lock.acquire()
@@ -81,16 +81,6 @@ class Frame:
         '''Returns True if the page has capacity for more records'''
         with self._write_lock:
             return self.page.has_capacity()
-
-    def increment_pin(self):
-        '''Increments the pin count'''
-        with self._pin_lock:
-            self.pin += 1
-
-    def decrement_pin(self):
-        '''Decrements the pin count'''
-        with self._pin_lock:
-            self.pin -= 1
 
 class BufferPool:
     '''Every access to pages should go through the bufferpool'''
@@ -125,7 +115,7 @@ class BufferPool:
             return current_frame
         
         current_frame:Frame = self.frames[page_frame_num]
-        current_frame.increment_pin()
+        current_frame.pin.count_up()
         return current_frame
     
     def get_page_has_capacity(self, page_range_index, record_column, page_index) -> Union[bool, None]:
@@ -141,7 +131,7 @@ class BufferPool:
                     return None
                 
                 current_frame:Frame = self.__load_new_frame(page_disk_path)
-                current_frame.decrement_pin()
+                current_frame.pin.count_down()
                 return current_frame.get_page_capacity()
             
         current_frame:Frame = self.frames[page_frame_num]
@@ -162,7 +152,7 @@ class BufferPool:
                 return current_frame.page.get(slot_index)
 
             current_frame:Frame = self.frames[page_frame_num]
-            current_frame.increment_pin()
+            current_frame.pin.count_up()
             return current_frame.page.get(slot_index)
     
     def write_page_slot(self, page_range_index, record_column, page_index, slot_index, value) -> bool:
@@ -180,10 +170,10 @@ class BufferPool:
                 current_frame:Frame = self.__load_new_frame(page_disk_path)
             else:
                 current_frame:Frame = self.frames[page_frame_num]
-                current_frame.increment_pin()
+                current_frame.pin.count_up()
 
         current_frame.write_precise_with_lock(slot_index, value)
-        current_frame.decrement_pin()
+        current_frame.pin.count_down()
         return True
     
     def write_page_next(self, page_range_index, record_column, page_index, value) -> Union[int, None]:
@@ -201,10 +191,10 @@ class BufferPool:
             current_frame:Frame = self.__load_new_frame(page_disk_path)
         else:
             current_frame:Frame = self.frames[page_frame_num]
-            current_frame.increment_pin()
+            current_frame.pin.count_up()
 
         slot_index = current_frame.write_with_lock(value)
-        current_frame.decrement_pin()
+        current_frame.pin.count_down()
         return slot_index
     
     def get_page_frame_num(self, page_range_index, record_column, page_index) -> Union[int, None]:
@@ -218,7 +208,7 @@ class BufferPool:
     
     def mark_frame_used(self, frame_num):
         '''Use this to close a frame once a page has been used'''
-        self.frames[frame_num].decrement_pin()
+        self.frames[frame_num].pin.count_down()
 
     def unload_all_frames(self):
         '''Unloads all frames in the bufferpool'''
@@ -235,7 +225,7 @@ class BufferPool:
         # Note: block inside get can be used to block transactions until a frame is available (Milestone 3)
         page_frame_num = self.available_frames_queue.get()
         current_frame:Frame = self.frames[page_frame_num]
-        current_frame.increment_pin()
+        current_frame.pin.count_up()
 
         current_frame.load_page(page_path)
         self.frame_directory[page_path] = page_frame_num
@@ -274,7 +264,7 @@ class BufferPool:
             frame_num = self.unavailable_frames_queue.get()
             current_frame:Frame = self.frames[frame_num]
 
-            if (current_frame.pin == 0):
+            if (current_frame.pin.count == 0):
                 #print(f"deleting {current_frame.page_path} from frame_directory")
                 # If the frame is not being used by any processes then we can deallocate it
                 del self.frame_directory[current_frame.page_path]
