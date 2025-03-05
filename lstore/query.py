@@ -35,15 +35,20 @@ class Query:
 
         # log deletion before it is removed
         if log_entry:
+            index_changes = []
+            for col_index, index in enumerate(self.table.index.indices):
+                if index:
+
+                    # for tuple: column, old_value, new_value (None)
+                    index_changes.append((col_index, prev_columns[col_index], None))
+
             log_entry["changes"].append({
                 "type": "delete",
                 "rid": base_rid[0],
                 "table": self.table.name,
                 "prev_columns": prev_columns,
                 "page_range": base_rid[0] // MAX_RECORD_PER_PAGE_RANGE,
-
-                # for tuple: key_column, old_key, new_key (None)
-                "index_changes": [(self.table.key, primary_key, None)]
+                "index_changes": index_changes
             })
 
         self.table.deallocation_base_rid_queue.put(base_rid[0])
@@ -82,15 +87,20 @@ class Query:
 
         # log insert
         if log_entry:
+            index_changes = []
+            for col_index, index in enumerate(self.table.index.indices):
+                if index:
+                    
+                    # for tuple: column, old_value (None), new_value
+                    index_changes.append((col_index, None, columns[col_index]))
+
             log_entry["changes"].append({
                 "type": "insert",
                 "rid": record.rid,
                 "table": self.table.name,
                 "columns": columns,
                 "page_range": record.rid // MAX_RECORD_PER_PAGE_RANGE,
-
-                # for tuple: key_column, old_key (None), new_key
-                "index_changes": [(self.table.key, None, columns[self.table.key])]
+                "index_changes": index_changes
             })
 
         return True
@@ -259,6 +269,13 @@ class Query:
 
         # log update changes
         if log_entry:
+            index_changes = []
+            for col_index, index in enumerate(self.table.index.indices):
+                if index and prev_columns[col_index] != columns[col_index]:
+
+                    # for tuple: column, old_value, new_value
+                    index_changes.append((col_index, prev_columns[col_index], columns[col_index]))
+                    
             log_entry["changes"].append({
                 "type": "update",
                 "rid": rid_location[0],
@@ -266,9 +283,7 @@ class Query:
                 "table": self.table.name,
                 "prev_columns": prev_columns,
                 "page_range": page_range_index,
-
-                # for tuple: key_column, old_key, new_key
-                "index_changes": [(self.table.key, prev_columns[self.table.key], primary_key)]
+                "index_changes": index_changes
             })
         return True
 
