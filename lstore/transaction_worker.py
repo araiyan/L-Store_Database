@@ -21,8 +21,7 @@ class TransactionWorker:
     Appends t to transactions
     """
     def add_transaction(self, t):
-        with self.lock:
-            self.transactions.append(t)
+        self.transactions.append(t)
     
     """
     Runs all transaction as a thread
@@ -37,13 +36,12 @@ class TransactionWorker:
     def join(self):
         if self.worker_thread is not None:
             self.worker_thread.join()
+
         return self.result
     
     def __run(self):
-        transactions_to_run = []
-        
-        with self.lock:
-            transactions_to_run = list(self.transactions)
+
+        transactions_to_run = list(self.transactions) if len(self.transactions) > 0 else []
         
         for transaction in transactions_to_run:
             transaction_id = id(transaction)
