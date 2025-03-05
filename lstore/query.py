@@ -30,11 +30,12 @@ class Query:
         base_rid = self.table.index.locate(self.table.key, primary_key)
         if(base_rid is None):
             return False  # Record does not exist
+        
+        prev_columns = self.__get_prev_columns(base_rid[0], *self.table.index.indices)
 
         self.table.deallocation_base_rid_queue.put(base_rid[0])
-        self.table.index.delete_from_all_indices(primary_key)
 
-        # Deletion successful
+        self.table.index.delete_from_all_indices(primary_key, prev_columns)
         return True
 
     """
@@ -184,6 +185,9 @@ class Query:
         
         new_columns = [None] * self.table.total_num_columns
         schema_encoding = 0
+
+        #for update index
+        prev_columns = self.__get_prev_columns(rid_location[0], *columns)
         
         for i, value in enumerate(columns):
 
@@ -224,7 +228,7 @@ class Query:
         self.table.bufferpool.mark_frame_used(schemaFrame_num)
 
         # Update successful
-        self.table.index.update_all_indices(primary_key, new_columns)
+        self.table.index.update_all_indices(primary_key, new_columns, prev_columns)
         # print("Update Successful\n")
 
         return True
@@ -282,7 +286,7 @@ class Query:
             found_value = False
             
             current_version_rid = current_tail_rid
-            while current_version_rid != (rid % MAX_RECORD_PER_PAGE_RANGE) and current_version <= relative_version:
+            while current_version_rid >= MAX_RECORD_PER_PAGE_RANGE and current_version <= relative_version:
                 # Read schema and timestamp from the tail record
                 tail_schema = self.table.page_ranges[page_range_index].read_tail_record_column(current_version_rid, SCHEMA_ENCODING_COLUMN)
                 tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(current_version_rid, TIMESTAMP_COLUMN)
@@ -351,3 +355,53 @@ class Query:
         frame_num = self.table.bufferpool.get_page_frame_num(page_range_index, column, page_index)
         frames_used.put(frame_num)
         return value
+    
+    def __get_prev_columns(self, rid, *columns):
+        prev_columns = [None] * self.table.num_columns
+        tail = False
+
+        page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
+
+        indir_rid = self.__readAndMarkSlot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
+        base_timestamp = self.__readAndMarkSlot(page_range_index, TIMESTAMP_COLUMN, page_index, page_slot)
+        base_schema = self.__readAndMarkSlot(page_range_index, SCHEMA_ENCODING_COLUMN, page_index, page_slot)
+
+        tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, TIMESTAMP_COLUMN)
+
+        for i in range(self.table.num_columns):
+            if columns[i] != None:
+                indir_rid = self.__readAndMarkSlot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
+                if indir_rid == (rid % MAX_RECORD_PER_PAGE_RANGE) : # if no updates
+                    prev_columns[i] = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + i, page_index, page_slot)
+
+                else:
+                    # if the tail page for column is latest updated 
+                    if(base_schema >> i) & 1:
+                        while True:
+                            try:
+                                tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(indir_rid, i + NUM_HIDDEN_COLUMNS)
+                                tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, TIMESTAMP_COLUMN)
+                                tail = True
+                                break
+                            except:
+                                prev_rid = indir_rid
+                                indir_rid = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, INDIRECTION_COLUMN)
+
+                                if indir_rid == rid: #edge case where latest updated column value is in the first tail record inserted
+                                    least_updated_tail_rid = self.table.page_ranges[page_range_index].read_tail_record_column(prev_rid, RID_COLUMN)
+                                    tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(least_updated_tail_rid, i + NUM_HIDDEN_COLUMNS)
+                                    tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(least_updated_tail_rid, TIMESTAMP_COLUMN)
+                                    tail = True
+                                    break
+
+
+                    # if the tail page for column is latest updated 
+                    if (base_schema >> i) & 1 and tail_timestamp >= base_timestamp and tail:
+                        prev_columns[i] = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + i, tail_page_index, tail_slot)
+
+                    else: 
+                        prev_columns[i] = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + i, page_index, page_slot)
+
+
+        # return prev latest column with queue of frame used to mark frames at the end
+        return prev_columns
