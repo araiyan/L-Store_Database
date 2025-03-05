@@ -28,14 +28,20 @@ class Index:
     """
     def locate(self, column, value):
 
+        if self.indices[column] == None:
+            return False
+        
         return list(self.indices[column].get(value, [])) or None
-
+    
     """
     # Returns the RIDs of all records with values in column "column" between "begin" and "end" as a list
     # returns None if no rid found
     """
 
     def locate_range(self, begin, end, column):
+
+        if self.indices[column] == None:
+            return False
 
         return [rid for sublist in self.indices[column].values(min=begin, max=end) for rid in sublist.keys()] or None
 
@@ -216,17 +222,25 @@ class Index:
         if not self.indices[self.key].get(primary_key):
             return False
         
-        #update new columns in value_mapper
+        #update primary key first if needed
+        if (new_columns[NUM_HIDDEN_COLUMNS + self.key] != None) and  (self.indices[self.key] != None) and (prev_columns[self.key] != None):
+
+            rid = list(self.indices[self.key][primary_key].keys())[0]
+
+            self.insert_to_index(self.key, new_columns[self.key + NUM_HIDDEN_COLUMNS], rid)
+            del self.indices[self.key][primary_key]
+                        
+            primary_key = new_columns[self.key + NUM_HIDDEN_COLUMNS]
+        
+        #update other indices
         for i in range(0, self.num_columns):
-            if new_columns[NUM_HIDDEN_COLUMNS + i] != None:
-                if (self.indices[i] != None) and (prev_columns[i] != None):
+            if (new_columns[NUM_HIDDEN_COLUMNS + i] != None) and (self.indices[i] != None) and (prev_columns[i] != None) and (i != self.key):
             
-                    key = prev_columns[i]
-                    rid = list(self.indices[self.key][primary_key].keys())[0]
+                    key = new_columns[i + NUM_HIDDEN_COLUMNS]
+                    rid = list(self.indices[self.key][new_columns[self.key + NUM_HIDDEN_COLUMNS]].keys())[0]
 
                     #if changed value is in key column, transfer to new mapping to new key and delete old key
                     if self.indices[i].get(new_columns[i + NUM_HIDDEN_COLUMNS]):
-
                         self.insert_to_index(i, new_columns[i + NUM_HIDDEN_COLUMNS], rid)
                         del self.indices[i][key][rid]
 
@@ -297,3 +311,11 @@ class Index:
             if index_column_number in data:
                 decoded_index = base64.b64decode(data[index_column_number])
                 self.indices[i] = pickle.loads(decoded_index)
+
+
+    def exist_index(self, column_number):
+        if self.indices[column_number] != None:
+            return True
+        else:
+            return False
+        
