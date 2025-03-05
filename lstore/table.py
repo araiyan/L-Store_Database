@@ -28,7 +28,7 @@ class Table:
     :param key: int             #Index of table(primary) key in column
     :db_path: string            #Path to the database directory where the table's data will be stored.
     """
-    def __init__(self, name, num_columns, key, db_path):
+    def __init__(self, name, num_columns, key, db_path, lock_manager):
         if (key < 0 or key >= num_columns):
             raise ValueError("Error Creating Table! Primary Key must be within the columns of the table")
 
@@ -38,6 +38,10 @@ class Table:
         self.table_path = os.path.join(db_path, name)
         self.num_columns = num_columns
         self.total_num_columns = num_columns + NUM_HIDDEN_COLUMNS
+
+        self.lock_manager = lock_manager    
+        self.table_id = f"table_{name}"
+
 
         self.page_directory = {}
         '''
@@ -93,34 +97,57 @@ class Table:
         return (page_range_index, page_index, page_slot)
 
     def insert_record(self, record: Record):
-        page_range_index, page_index, page_slot = self.get_base_record_location(record.rid)
 
-        if (page_range_index >= len(self.page_ranges)):
-            self.page_ranges.append(PageRange(page_range_index, self.num_columns, self.bufferpool))
-        
-        current_page_range:PageRange = self.page_ranges[page_range_index]
+        tid = threading.get_ident()
 
-        with current_page_range.page_range_lock:
-            record.columns[TIMESTAMP_COLUMN] = current_page_range.tps
-        current_page_range.write_base_record(page_index, page_slot, record.columns)   
+        try:
+            self.lock_manager.acquire_lock(tid, self.table_id, 'IX')
+            self.lock_manager.acquire_lock(tid, record.rid, 'X')
+
+            page_range_index, page_index, page_slot = self.get_base_record_location(record.rid)
+
+            if (page_range_index >= len(self.page_ranges)):
+                self.page_ranges.append(PageRange(page_range_index, self.num_columns, self.bufferpool))
+            
+            current_page_range:PageRange = self.page_ranges[page_range_index]
+
+            with current_page_range.page_range_lock:
+                record.columns[TIMESTAMP_COLUMN] = current_page_range.tps
+            current_page_range.write_base_record(page_index, page_slot, record.columns)   
+
+        finally:
+            self.lock_manager.release_lock(tid, record.rid, 'X')
+            self.lock_manager.release_lock(tid, self.table_id, 'IX')
 
     def update_record(self, rid, columns) -> bool:
-        '''Updates a record given its RID'''
-        page_range_index = rid // MAX_RECORD_PER_PAGE_RANGE
-        current_page_range:PageRange = self.page_ranges[page_range_index]
 
-        with current_page_range.page_range_lock:
-            columns[TIMESTAMP_COLUMN] = current_page_range.tps
-            
-        update_success = current_page_range.write_tail_record(columns[RID_COLUMN], *columns)
+        tid = threading.get_ident()
 
-        if (current_page_range.tps % (MAX_TAIL_PAGES_BEFORE_MERGING * MAX_RECORD_PER_PAGE) == 0):
-            self.merge_queue.put(MergeRequest(current_page_range.page_range_index)) 
-            # if (self.merge_thread.is_alive() == False):
-            #     self.merge_thread = threading.Thread(target=self.__merge)
-            #     self.merge_thread.start()
+        try:
 
-        return update_success
+            self.lock_manager.acquire_lock(tid, self.table_id, 'IX')
+            self.lock_manager.acquire_lock(tid, rid, 'X')
+
+            '''Updates a record given its RID'''
+            page_range_index = rid // MAX_RECORD_PER_PAGE_RANGE
+            current_page_range:PageRange = self.page_ranges[page_range_index]
+
+            with current_page_range.page_range_lock:
+                columns[TIMESTAMP_COLUMN] = current_page_range.tps
+                
+            update_success = current_page_range.write_tail_record(columns[RID_COLUMN], *columns)
+
+            if (current_page_range.tps % (MAX_TAIL_PAGES_BEFORE_MERGING * MAX_RECORD_PER_PAGE) == 0):
+                self.merge_queue.put(MergeRequest(current_page_range.page_range_index)) 
+                # if (self.merge_thread.is_alive() == False):
+                #     self.merge_thread = threading.Thread(target=self.__merge)
+                #     self.merge_thread.start()
+
+            return update_success
+        
+        finally:
+            self.lock_manager.release_lock(tid, rid, 'X')
+            self.lock_manager.release_lock(tid, self.table_id, 'IX')
 
     
     def __merge(self):
