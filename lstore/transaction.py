@@ -25,13 +25,19 @@ class Transaction:
     # If you choose to implement this differently this method must still return True if transaction commits or False on abort
     def run(self):
         for query, table, args in self.queries:
-            result = query(*args)
+
+            # create log dictionary to store changes made during a given transaction
+            log_entry = {"query": query.__name__, "table": table, "args": args, "changes": []}
+
+            # pass log_entry into query
+            result = query(*args, log_entry)
+
             # If the query has failed the transaction should abort
             if result == False:
                 return self.abort()
             
             # log successful operations for future potential rollback
-            self.log.append((query, table, args))
+            self.log.append(log_entry)
 
         return self.commit()
 

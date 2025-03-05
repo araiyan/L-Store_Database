@@ -24,7 +24,7 @@ class Query:
     """
 
     # Delete was simplified to just locate rid and put it on the queue, then deleting indices. Actual process will occur in merge function
-    def delete(self, primary_key):
+    def delete(self, primary_key, log_entry=None):
 
         # Locate the RID associated with the primary key
         base_rid = self.table.index.locate(self.table.key, primary_key)
@@ -32,6 +32,19 @@ class Query:
             return False  # Record does not exist
         
         prev_columns = self.__get_prev_columns(base_rid[0], *self.table.index.indices)
+
+        # log deletion before it is removed
+        if log_entry:
+            log_entry["changes"].append({
+                "type": "delete",
+                "rid": base_rid[0],
+                "table": self.table.name,
+                "prev_columns": prev_columns,
+                "page_range": base_rid[0] // MAX_RECORD_PER_PAGE_RANGE,
+
+                # for tuple: key_column, old_key, new_key (None)
+                "index_changes": [(self.table.key, primary_key, None)]
+            })
 
         self.table.deallocation_base_rid_queue.put(base_rid[0])
 
@@ -43,7 +56,7 @@ class Query:
     # Return True upon succesful insertion
     # Returns False if insert fails for whatever reason
     """
-    def insert(self, *columns):
+    def insert(self, *columns, log_entry=None):
 
         if (self.table.index.locate(self.table.key, columns[self.table.key])):
             return False
@@ -66,6 +79,19 @@ class Query:
     
         self.table.insert_record(record)
         self.table.index.insert_in_all_indices(record.columns)
+
+        # log insert
+        if log_entry:
+            log_entry["changes"].append({
+                "type": "insert",
+                "rid": record.rid,
+                "table": self.table.name,
+                "columns": columns,
+                "page_range": record.rid // MAX_RECORD_PER_PAGE_RANGE,
+
+                # for tuple: key_column, old_key (None), new_key
+                "index_changes": [(self.table.key, None, columns[self.table.key])]
+            })
 
         return True
 
@@ -177,7 +203,7 @@ class Query:
     # Returns True if update is succesful
     # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking (Ignore this for now)
     """
-    def update(self, primary_key, *columns):
+    def update(self, primary_key, *columns, log_entry=None):
         rid_location = self.table.index.locate(self.table.key, primary_key)
         if rid_location is None:
             print("Update Error: Record does not exist")
@@ -231,6 +257,19 @@ class Query:
         self.table.index.update_all_indices(primary_key, new_columns, prev_columns)
         # print("Update Successful\n")
 
+        # log update changes
+        if log_entry:
+            log_entry["changes"].append({
+                "type": "update",
+                "rid": rid_location[0],
+                "prev_tail_rid": prev_tail_rid,
+                "table": self.table.name,
+                "prev_columns": prev_columns,
+                "page_range": page_range_index,
+
+                # for tuple: key_column, old_key, new_key
+                "index_changes": [(self.table.key, prev_columns[self.table.key], primary_key)]
+            })
         return True
 
 
