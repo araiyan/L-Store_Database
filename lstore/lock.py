@@ -153,6 +153,8 @@ class LockManager:
                         del self.lock_table[record_id]
             self.condition.notify_all()
 
+            # Since we are following strict 2PL we ensure this transaction will not grab locks in the future
+            # so we can remove all edges associated with this trasaction id
             self.wait_for_graph.remove_transaction(transaction_id)
             self.transaction_states[transaction_id] = 'shrinking' 
 
