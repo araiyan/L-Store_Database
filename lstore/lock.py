@@ -30,16 +30,16 @@ class WaitForGraph:
     def add_edge(self, transaction_id1, transaction_id2):
         '''Returns False if a deadlock is detected after adding the edge'''
         with self.lock:
-            print(f"Adding edge from {transaction_id1} to {transaction_id2}")
+            #print(f"Adding edge from {transaction_id1} to {transaction_id2}")
             self.graph[transaction_id1].add(transaction_id2)
             if (self.detect_cycle()):
-                raise Exception(f"Deadlock detected when adding edge from {transaction_id1} to {transaction_id2}")
+                return False
 
         return True
     
     def remove_edge(self, transaction_id1, transaction_id2):
         with self.lock:
-            print(f"Removing edge from {transaction_id1} to {transaction_id2}")
+            #print(f"Removing edge from {transaction_id1} to {transaction_id2}")
             if transaction_id2 in self.graph[transaction_id1]:
                 self.graph[transaction_id1].remove(transaction_id2)
             if not self.graph[transaction_id1]:
@@ -51,13 +51,15 @@ class WaitForGraph:
                 del self.graph[transaction_id]
 
             for transaction in self.graph.values():
+                # print("Removing transaction", transaction, "from", transaction_id)
                 transaction.discard(transaction_id)
 
     def detect_cycle(self):
         '''Returns True if there is a Cycle for the given transaction_id'''
         visited = set()
         stack = set()
-        for transaction in self.graph:
+        transactions = list(self.graph.keys())
+        for transaction in transactions:
             if self._detect_cycle(transaction, visited, stack):
                 return True
         return False
@@ -94,19 +96,28 @@ class LockManager:
                 raise Exception(f"Transaction {transaction_id} is in the shrinking phase and cannot acquire more locks.")
 
             if lock_type == 'X':
+                # print("Acquiring exclusive lock", transaction_id, record_id)
                 # Wait until no other transaction holds a lock on the record
                 while self.lock_table[record_id]['S'] or self.lock_table[record_id]['X'] or self.lock_table[record_id]['IS'].count > 0 or self.lock_table[record_id]['IX'].count > 0:
                     # Since its a set we can keep adding the edge even if it already exists
-                    self.wait_for_graph.add_edge(transaction_id, record_id)
-                    self.condition.wait()
+                    other_transaction = next(iter(self.lock_table[record_id]['S'] | self.lock_table[record_id]['X']))
+                    if self.wait_for_graph.add_edge(transaction_id, other_transaction):
+                        self.condition.wait()
+                    else:
+                        self.release_all_locks(transaction_id)
+                        raise Exception(f"Deadlock detected grabbing exclusive lock - Transaction {transaction_id} is waiting for {other_transaction}")
                 self.lock_table[record_id]['X'].add(transaction_id)
 
             elif lock_type == 'S':
-                # print("Acquiring shared lock", self.lock_table[record_id]['X'], self.lock_table[record_id]['IX'].count)
+                # print("Acquiring exclusive lock", transaction_id, record_id)
                 # Wait until no other transaction holds an exclusive lock on the record
                 while self.lock_table[record_id]['X'] or self.lock_table[record_id]['IX'].count > 0:
-                    self.wait_for_graph.add_edge(transaction_id, record_id)
-                    self.condition.wait()
+                    other_transaction = next(iter(self.lock_table[record_id]['X']))
+                    if self.wait_for_graph.add_edge(transaction_id, other_transaction):
+                        self.condition.wait()
+                    else:
+                        self.release_all_locks(transaction_id)
+                        raise Exception(f"Deadlock detected grabbing shared lock - Transaction {transaction_id} is waiting for {other_transaction}")
                 self.lock_table[record_id]['S'].add(transaction_id)
 
             elif lock_type == 'IS':
