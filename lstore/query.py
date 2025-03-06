@@ -1,5 +1,7 @@
 from lstore.table import Table, Record
 from lstore.config import *
+from lstore.lock import LockManager
+import threading
 
 from time import time
 from queue import Queue
@@ -10,9 +12,11 @@ class Query:
     Queries that fail must return False
     Queries that succeed should return the result or True
     Any query that crashes (due to exceptions) should return False
+    Supports rollback for transactional consistency.
     """
     def __init__(self, table):
         self.table:Table = table
+        self.lock_manager = table.db.lock_manager  # Access DB-level LockManager
         pass
 
     
@@ -25,8 +29,23 @@ class Query:
 
     # Delete was simplified to just locate rid and put it on the queue, then deleting indices. Actual process will occur in merge function
     def delete(self, primary_key):
+        """
+        Marks a record for deletion but does not remove it immediately.
+        Actual deletion occurs during the merge process.
+        Returns True upon successful deletion, False if record does not exist.
+        """
+        """ Deletes a record with proper hierarchical locking. """
+        transaction_id = threading.get_ident()
 
-        # Locate the RID associated with the primary key
+        # Acquire IX lock at the table level before getting an X lock at the record level
+        if not self.lock_manager.acquire_lock(transaction_id, self.table.name, "IX"):
+            return False  # Abort if IX lock is unavailable
+
+        # Acquire X lock at the record level
+        if not self.lock_manager.acquire_lock(transaction_id, primary_key, "X"):
+            return False  # Abort if X lock is unavailable
+
+        
         base_rid = self.table.index.locate(self.table.key, primary_key)
         if(base_rid is None):
             return False  # Record does not exist
