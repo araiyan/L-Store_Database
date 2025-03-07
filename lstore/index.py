@@ -2,9 +2,12 @@
 A data strucutre holding indices for various columns of a table. Key column should be indexd by default, other columns can be indexed through this object. Indices are usually B-Trees, but other data structures can be used as well.
 """
 import base64
+import threading
 from lstore.config import *
 from BTrees.OOBTree import OOBTree
 import pickle
+
+from lstore.lock import LockManager
 
 class Index:
 
@@ -16,22 +19,37 @@ class Index:
         self.key = table.key
         self.table = table
 
+        self.lock_manager = table.lock_manager
+        #self.lock_manager = LockManager()
+        # self.transaction_locks = {transaction1: {index_id1: locktype}}
+        self.transaction_locks = {}
+        self.record_transaction_lock = threading.Lock()
+        self.serialize_lock = threading.Lock()
+
         has_stored_index  = self.__generate_primary_index()
 
         if not has_stored_index:
-            self.create_index(self.key)
+            self.indices[self.key] = OOBTree()
+            #self.create_index(self.key)
 
 
     """
     # returns the location of all records with the given value on column "column" as a list
     # returns None if no rid found
     """
+    # keep tracks of locks used and only release at the end
+
     def locate(self, column, value):
 
-        if self.indices[column] == None:
+        transaction_id = self.table.get_transaction_id()
+        self.__lock_index(column, "S", transaction_id)
+
+        if self.indices[column] is None:
             return False
-        
-        return list(self.indices[column].get(value, [])) or None
+            
+        rid = list(self.indices[column].get(value, [])) or None
+        return rid
+
     
     """
     # Returns the RIDs of all records with values in column "column" between "begin" and "end" as a list
@@ -40,10 +58,14 @@ class Index:
 
     def locate_range(self, begin, end, column):
 
+        transaction_id = self.table.get_transaction_id()
+
+        self.__lock_index(column, "S", transaction_id)
         if self.indices[column] == None:
             return False
-
-        return [rid for sublist in self.indices[column].values(min=begin, max=end) for rid in sublist.keys()] or None
+        
+        rid = [rid for sublist in self.indices[column].values(min=begin, max=end) for rid in sublist.keys()] or None
+        return rid
 
 
     # create secondary index through page range and bufferpool    
@@ -54,6 +76,11 @@ class Index:
 
         if self.indices[column_number] == None:
 
+            transaction_id = self.table.get_transaction_id()
+
+            #lock the entire index that's getting created
+            self.__lock_index(column_number, "X", transaction_id)
+
             self.indices[column_number] = OOBTree()
             # go through value mapper to create new index
             all_base_rids = self.grab_all()
@@ -61,62 +88,59 @@ class Index:
             column_value =  None
             tail_timestamp = 0
             tail = False
+
             #read through bufferpool to get latest tail record
             for rid in all_base_rids:
 
+                self.__check_and_lock(transaction_id, rid, "S")
                 page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
+                self.__check_and_lock(transaction_id, page_index, "IS")
 
-                indir_rid = self.table.bufferpool.read_page_slot(page_range_index, INDIRECTION_COLUMN, page_index, page_slot)
-                frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, INDIRECTION_COLUMN, page_index)
-                self.table.bufferpool.mark_frame_used(frame_num)
+                base_schema = self.__lock_read_mark(page_range_index, page_index, page_slot, SCHEMA_ENCODING_COLUMN, transaction_id, rid)
+                indir_rid = self.__lock_read_mark(page_range_index, page_index, page_slot, INDIRECTION_COLUMN, transaction_id, rid)
 
-                base_schema = self.table.bufferpool.read_page_slot(page_range_index, SCHEMA_ENCODING_COLUMN, page_index, page_slot)
-                frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, SCHEMA_ENCODING_COLUMN, page_index)
-                self.table.bufferpool.mark_frame_used(frame_num)
+                self.__check_and_lock(transaction_id, indir_rid, "S")
 
                 """ Referencing latest tail page search from sum version """
                 if indir_rid == (rid % MAX_RECORD_PER_PAGE_RANGE) : # if no updates
 
-                    column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index, page_slot)
-                    frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index)
-                    self.table.bufferpool.mark_frame_used(frame_num)
+                    column_value = self.__lock_read_mark(page_range_index, page_index, page_slot, column_number + NUM_HIDDEN_COLUMNS, transaction_id, rid)
 
                 else: #if updates
 
-                    base_timestamp = self.table.bufferpool.read_page_slot(page_range_index, TIMESTAMP_COLUMN, page_index, page_slot)
-                    frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, TIMESTAMP_COLUMN, page_index)
-                    self.table.bufferpool.mark_frame_used(frame_num)
+                    base_timestamp = self.__lock_read_mark(page_range_index, page_index, page_slot, TIMESTAMP_COLUMN, transaction_id, rid)
 
                     if(base_schema >> column_number) & 1:
 
                         while True:
                             try:
+
                                 tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(indir_rid, column_number + NUM_HIDDEN_COLUMNS)
                                 tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, TIMESTAMP_COLUMN)
                                 tail = True
+
                                 break
                             except:
-
                                 prev_rid = indir_rid
                                 indir_rid = self.table.page_ranges[page_range_index].read_tail_record_column(indir_rid, INDIRECTION_COLUMN)
 
                                 if indir_rid == rid: #edge case where latest updated column value is in the first tail record inserted
+                                    self.__check_and_lock(transaction_id, prev_rid, "S")
+
                                     least_updated_tail_rid = self.table.page_ranges[page_range_index].read_tail_record_column(prev_rid, RID_COLUMN)
                                     tail_page_index, tail_slot = self.table.page_ranges[page_range_index].get_column_location(least_updated_tail_rid, column_number + NUM_HIDDEN_COLUMNS)
                                     tail_timestamp = self.table.page_ranges[page_range_index].read_tail_record_column(least_updated_tail_rid, TIMESTAMP_COLUMN)
                                     tail = True
                                     break
 
+                                self.__check_and_lock(transaction_id, indir_rid, "S")
+
                     # if the tail page for column is latest updated 
                     if (base_schema >> column_number) & 1 and tail_timestamp >= base_timestamp and tail:
-                        column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, tail_page_index, tail_slot)
-                        frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index)
-                        self.table.bufferpool.mark_frame_used(frame_num)
+                        column_value = self.__lock_read_mark(page_range_index, tail_page_index, tail_slot, column_number + NUM_HIDDEN_COLUMNS, transaction_id, indir_rid)
 
                     else: # if merged page is latest updated
-                        column_value = self.table.bufferpool.read_page_slot(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index, page_slot)
-                        frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, column_number + NUM_HIDDEN_COLUMNS, page_index)
-                        self.table.bufferpool.mark_frame_used(frame_num)
+                        column_value = self.__lock_read_mark(page_range_index, page_index, page_slot, column_number + NUM_HIDDEN_COLUMNS, transaction_id, rid)
                 
                 #insert {primary_index: {rid: True}} into primary index BTree
                 self.insert_to_index(column_number, column_value, rid)
@@ -131,9 +155,12 @@ class Index:
     """
     def drop_index(self, column_number):
 
+        transaction_id = self.table.get_transaction_id()
+
         if column_number >= self.table.num_columns:
             return False
-
+        
+        self.__lock_index(column_number, "X", transaction_id)
         # clears Btree and removes reference 
         if self.indices[column_number] != None:
 
@@ -176,7 +203,12 @@ class Index:
     # Takes a record and insert it into value_mapper, primary and secondary index
     """
     def insert_in_all_indices(self, columns):
-        
+
+        transaction_id = self.table.get_transaction_id()
+
+        self.__lock_index(self.key, "S", transaction_id)
+        self.__lock_index(self.key, "IX", transaction_id)
+
         primary_key = columns[self.key + NUM_HIDDEN_COLUMNS]
         if self.indices[self.key].get(primary_key):
             return False
@@ -185,9 +217,17 @@ class Index:
         for i in range(self.num_columns):
 
             if self.indices[i] != None:
+
+
                 column_value = columns[i + NUM_HIDDEN_COLUMNS]
                 rid = columns[RID_COLUMN]
-                self.insert_to_index(i,column_value, rid)
+
+                if i == self.key:
+                    self.__update_lock_index(transaction_id, i, "IX", "X")
+                else:
+                    self.__lock_index(i, "X", transaction_id)
+
+                self.insert_to_index(i, column_value, rid)
 
         return True
 
@@ -196,18 +236,25 @@ class Index:
     """
     def delete_from_all_indices(self, primary_key, prev_columns):
 
+        transaction_id = self.table.get_transaction_id()
+        self.__lock_index(self.key, "S", transaction_id)
+        self.__lock_index(self.key, "IX", transaction_id)
+
         if not self.indices[self.key].get(primary_key):
             return False
         
         rid = list(self.indices[self.key][primary_key].keys())[0]
 
-        # if we have secondary index, delete from those too
         for i in range(self.num_columns):
 
             if (self.indices[i] != None) and (prev_columns[i] != None):
 
-                del self.indices[i][prev_columns[i]][rid]
+                if i == self.key:
+                    self.__update_lock_index(transaction_id, i, "IX", "X")
+                else:
+                    self.__lock_index(i, "X", transaction_id)
 
+                del self.indices[i][prev_columns[i]][rid]
                 if self.indices[i][prev_columns[i]] == {}:
                     del self.indices[i][prev_columns[i]]
 
@@ -218,6 +265,10 @@ class Index:
     """
     def update_all_indices(self, primary_key, new_columns, prev_columns):
 
+        transaction_id = self.table.get_transaction_id()
+        self.__lock_index(self.key, "S", transaction_id)
+        self.__lock_index(self.key, "IX", transaction_id)
+
         #get rid from primary key
         if not self.indices[self.key].get(primary_key):
             return False
@@ -227,6 +278,8 @@ class Index:
 
             rid = list(self.indices[self.key][primary_key].keys())[0]
 
+            self.__update_lock_index(transaction_id, self.key, "IX", "X")
+
             self.insert_to_index(self.key, new_columns[self.key + NUM_HIDDEN_COLUMNS], rid)
             del self.indices[self.key][primary_key]
                         
@@ -235,7 +288,9 @@ class Index:
         #update other indices
         for i in range(0, self.num_columns):
             if (new_columns[NUM_HIDDEN_COLUMNS + i] != None) and (self.indices[i] != None) and (prev_columns[i] != None) and (i != self.key):
-            
+                    
+                    self.__lock_index(i, "X", transaction_id)
+
                     key = prev_columns[i]
                     rid = list(self.indices[self.key][new_columns[self.key + NUM_HIDDEN_COLUMNS]].keys())[0]
 
@@ -254,14 +309,16 @@ class Index:
         return True
     
 
-    """
-    # get all rid from primary index for merge
-    """
     def grab_all(self):
+
+        transaction_id = self.table.get_transaction_id()
+        self.__lock_index(self.key, "S", transaction_id)
+
         all_rid = []
         for _, rids in self.indices[self.key].items():
             for rid in rids:
                 all_rid.append(rid)
+
         return all_rid
         
     # use this when open db
@@ -272,12 +329,25 @@ class Index:
         if not all_base_rids:
             return False
         
+        transaction_id = self.table.get_transaction_id()
+        self.__lock_index(self.key, "X", transaction_id)
+
         self.indices[self.key] = OOBTree()
         frames_used = []
         
         #read through bufferpool to get primary index
         for rid in all_base_rids:
+
+            if not self.__contains_lock(transaction_id, rid, "S"):
+                self.lock_manager.acquire_lock(transaction_id, rid, "S")
+                self.__record_lock_acquiring(transaction_id, rid, "S")
+
             page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
+
+            if not self.__contains_lock(transaction_id, page_index, "IS"):
+                self.lock_manager.acquire_lock(transaction_id, page_index, "IS")
+                self.__record_lock_acquiring(transaction_id, page_index, "IS")
+
             primary_key = self.table.bufferpool.read_page_slot(page_range_index, self.key + NUM_HIDDEN_COLUMNS, page_index, page_slot)
             frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, self.key + NUM_HIDDEN_COLUMNS, page_index)
             frames_used.append(frame_num)
@@ -292,30 +362,84 @@ class Index:
     # call "index:": self.index.serialize() from table
     # pickle every index BTree and then store them in base64
     def serialize(self):
+        with self.serialize_lock:
+            all_serialized_data = {}
 
-        all_serialized_data = {}
+            for i in range(self.num_columns):
+                if self.indices[i] != None:
+                    pickled_index = pickle.dumps(self.indices[i])
+                    encoded_pickled_index = base64.b64encode(pickled_index).decode('utf-8')
+                    all_serialized_data[f"index[{i}]"] = encoded_pickled_index
 
-        for i in range(self.num_columns):
-            if self.indices[i] != None:
-                pickled_index = pickle.dumps(self.indices[i])
-                encoded_pickled_index = base64.b64encode(pickled_index).decode('utf-8')
-                all_serialized_data[f"index[{i}]"] = encoded_pickled_index
-
-        return all_serialized_data
+            return all_serialized_data
     
     # call index.deserialize(json_data["Index"]) from table
     def deserialize(self, data):
-
-        for i in range(self.num_columns):
-            index_column_number = f"index[{i}]"
-            if index_column_number in data:
-                decoded_index = base64.b64decode(data[index_column_number])
-                self.indices[i] = pickle.loads(decoded_index)
+        with self.serialize_lock:
+            for i in range(self.num_columns):
+                index_column_number = f"index[{i}]"
+                if index_column_number in data:
+                    decoded_index = base64.b64decode(data[index_column_number])
+                    self.indices[i] = pickle.loads(decoded_index)
 
 
     def exist_index(self, column_number):
+
+        transaction_id = self.table.get_transaction_id()
+        self.__lock_index(column_number, "S", transaction_id)
+
         if self.indices[column_number] != None:
             return True
         else:
             return False
+    
+
+    def __lock_read_mark(self, page_range_index, page_index,page_slot, column_number, transaction_id, record_id):
+
+        self.__check_and_lock(transaction_id, record_id, "S")
+
+        item_read = self.table.bufferpool.read_page_slot(page_range_index, column_number, page_index, page_slot)
+        frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, INDIRECTION_COLUMN, page_index)
+        self.table.bufferpool.mark_frame_used(frame_num)
+
+        return item_read
+
+    def __lock_index(self, column_number, lock_type, transaction_id):
+        index_id = f"index{column_number}"
+        self.__check_and_lock(transaction_id, index_id, lock_type)
+
+    def __update_lock_index(self, transaction_id, column_number, cur_lock_type, new_lock_type):
+        index_id = f"index{column_number}"
+        if not self.__contains_lock(transaction_id, index_id, new_lock_type):
+            self.lock_manager.upgrade_lock(transaction_id, index_id, cur_lock_type, new_lock_type)
+            self.__record_lock_acquiring(transaction_id, index_id, new_lock_type)
+
+    def __lock_index_tuple(self, column_number, column_value, lock_type, transaction_id):
+        index_tuple_id = f"index{column_number}_{column_value}"
+        self.lock_manager.acquire_lock(transaction_id, index_tuple_id, lock_type)
+    
+    def get_index_id(self, column_number):
+        return f"index{column_number}"
+    
+    def __check_and_lock(self, transaction_id, record_id, lock_type):
+        if not self.__contains_lock(transaction_id, record_id, lock_type):
+            self.lock_manager.acquire_lock(transaction_id, record_id, lock_type)
+            self.__record_lock_acquiring(transaction_id, record_id, lock_type)
+    
+    # self.transaction_locks = {transaction1: {index_id1: "S", "IX", "IS"...}}
+    def __contains_lock(self, transaction_id, index_id, lock_type):
+        if index_id in self.transaction_locks[transaction_id] and lock_type in self.transaction_locks[transaction_id].get(index_id, []):
+            return True
+        else:
+            return False
         
+    def __record_lock_acquiring(self, transaction_id, index_id, lock_type):
+        with self.record_transaction_lock:
+            if transaction_id not in self.transaction_locks:
+                self.transaction_locks[transaction_id] = {}
+
+            if index_id not in self.transaction_locks[transaction_id]:
+                self.transaction_locks[transaction_id][index_id] = []
+
+            if lock_type not in self.transaction_locks[transaction_id][index_id]:
+                self.transaction_locks[transaction_id][index_id].append(lock_type)
