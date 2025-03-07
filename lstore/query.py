@@ -131,9 +131,17 @@ class Query:
     """
     def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
 
-        rid_list = self.table.index.locate(search_key_index, search_key)
-        if not rid_list:
-            raise ValueError("No records found with the given key")
+        if not self.table.index.exist_index(search_key_index):
+
+            self.table.index.create_index(search_key_index)
+            rid_list = self.table.index.locate(search_key_index, search_key)
+            self.table.index.drop_index(search_key_index)
+
+        else:
+            rid_list = self.table.index.locate(search_key_index, search_key)
+        
+        if rid_list == None:
+            return []
         
         record_objs = []
 
@@ -216,7 +224,6 @@ class Query:
     def update(self, primary_key, *columns, log_entry=None):
         rid_location = self.table.index.locate(self.table.key, primary_key)
         if rid_location is None:
-            print("Update Error: Record does not exist")
             return False
         
         new_columns = [None] * self.table.total_num_columns
@@ -391,7 +398,7 @@ class Query:
         r = self.select(key, self.table.key, [1] * self.table.num_columns)[0]
         if r is not False:
             updated_columns = [None] * self.table.num_columns
-            updated_columns[column] = r[column] + 1
+            updated_columns[column] = r.columns[column] + 1
             u = self.update(key, *updated_columns)
             return u
         return False
