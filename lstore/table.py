@@ -98,11 +98,9 @@ class Table:
 
     def insert_record(self, record: Record):
 
-        tid = threading.get_ident()
-
         try:
-            self.lock_manager.acquire_lock(tid, self.table_id, 'IX')
-            self.lock_manager.acquire_lock(tid, record.rid, 'X')
+            self.acquire_table_lock('IX')
+            self.acquire_record_lock(record.rid, 'X')
 
             page_range_index, page_index, page_slot = self.get_base_record_location(record.rid)
 
@@ -116,17 +114,15 @@ class Table:
             current_page_range.write_base_record(page_index, page_slot, record.columns)   
 
         finally:
-            self.lock_manager.release_lock(tid, record.rid, 'X')
-            self.lock_manager.release_lock(tid, self.table_id, 'IX')
+            self.release_record_lock(record.rid, 'X')
+            self.release_table_lock('IX')
 
     def update_record(self, rid, columns) -> bool:
 
-        tid = threading.get_ident()
-
         try:
 
-            self.lock_manager.acquire_lock(tid, self.table_id, 'IX')
-            self.lock_manager.acquire_lock(tid, rid, 'X')
+            self.acquire_table_lock('IX')
+            self.acquire_record_lock(rid, 'X')
 
             '''Updates a record given its RID'''
             page_range_index = rid // MAX_RECORD_PER_PAGE_RANGE
@@ -146,9 +142,8 @@ class Table:
             return update_success
         
         finally:
-            self.lock_manager.release_lock(tid, rid, 'X')
-            self.lock_manager.release_lock(tid, self.table_id, 'IX')
-
+            self.release_record_lock(rid, 'X')
+            self.release_table_lock('IX')
     
     def __merge(self):
         # print("Merge is happening")
@@ -317,3 +312,19 @@ class Table:
                     logical_rid = page_range.bufferpool.read_page_slot(page_range_idx, INDIRECTION_COLUMN, logical_page_index, logical_page_slot)
             
                 self.deallocation_base_rid_queue.task_done()
+
+def acquire_record_lock(self, rid, lock_type):
+    tid = threading.get_ident()
+    self.lock_manager.acquire_lock(tid, rid, lock_type)
+
+def release_record_lock(self, rid, lock_type):
+    tid = threading.get_ident()
+    self.lock_manager.release_lock(tid, rid, lock_type)
+
+def acquire_table_lock(self, lock_type):
+    tid = threading.get_ident()
+    self.lock_manager.acquire_lock(tid, self.table_id, lock_type)
+
+def release_table_lock(self, lock_type):
+    tid = threading.get_ident()
+    self.lock_manager.release_lock(tid, self.table_id, lock_type)
