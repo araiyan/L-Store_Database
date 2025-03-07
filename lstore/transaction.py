@@ -29,9 +29,12 @@ class Transaction:
             # create log dictionary to store changes made during a given transaction
             log_entry = {"query": query.__name__, "table": table, "args": args, "changes": []}
 
-            # pass log_entry into query
-            result = query(*args, log_entry)
-
+            # pass log_entry into query only if insert, update, or delete
+            if query.__name__ in ["insert", "update", "delete"]:
+                result = query(*args, log_entry=log_entry)
+            else:
+                result = query(*args) 
+            
             # If the query has failed the transaction should abort
             if result == False:
                 return self.abort()
