@@ -40,8 +40,6 @@ class Table:
         self.total_num_columns = num_columns + NUM_HIDDEN_COLUMNS
 
         self.lock_manager = lock_manager    
-        self.table_id = f"table_{name}"
-
 
         self.page_directory = {}
         '''
@@ -323,8 +321,8 @@ def release_record_lock(self, rid, lock_type):
 
 def acquire_table_lock(self, lock_type):
     tid = threading.get_ident()
-    self.lock_manager.acquire_lock(tid, self.table_id, lock_type)
+    self.lock_manager.acquire_lock(tid, self.name, lock_type)
 
 def release_table_lock(self, lock_type):
     tid = threading.get_ident()
-    self.lock_manager.release_lock(tid, self.table_id, lock_type)
+    self.lock_manager.release_lock(tid, self.name, lock_type)

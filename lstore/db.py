@@ -15,7 +15,6 @@ class Database():
         self.path = path
         self.no_path_set = True
         self.lock_manager = LockManager()
-        self.db_id = "database"
         atexit.register(self.__remove_db_path)
         
 
@@ -83,7 +82,7 @@ class Database():
         tid = threading.get_ident()
         
         try:
-            self.lock_manager.acquire_lock(tid, self.db_id, 'IX')
+            self.lock_manager.acquire_lock(tid, self.path, 'IX')
 
             if self.tables.get(name) is not None:
                 raise NameError(f"Error creating Table! Following table already exists: {name}")
@@ -92,7 +91,7 @@ class Database():
             return self.tables[name]
         
         finally:
-            self.lock_manager.release_lock(tid, self.db_id, 'IX')
+            self.lock_manager.release_lock(tid, self.path, 'IX')
 
     
     """
@@ -103,7 +102,7 @@ class Database():
         tid = threading.get_ident()
 
         try:
-            self.lock_manager.acquire_lock(tid, self.db_id, 'IX')
+            self.lock_manager.acquire_lock(tid, self.path, 'IX')
 
             if self.tables.get(name) is None:
                 raise NameError(f"Error dropping Table! Following table does not exist: {name}")
@@ -115,7 +114,7 @@ class Database():
 
         finally:
             self.lock_manager.release_lock(tid, table.name, 'X')
-            self.lock_manager.release_lock(tid, self.db_id, 'IX')
+            self.lock_manager.release_lock(tid, self.path, 'IX')
 
     
     """
@@ -126,7 +125,7 @@ class Database():
         tid = threading.get_ident()
 
         try:
-            self.lock_manager.acquire_lock(tid, self.db_id, 'S')
+            self.lock_manager.acquire_lock(tid, self.path, 'S')
 
             if self.tables.get(name) is None:
                 raise NameError(f"Error getting Table! Following table does not exist: {name}")
@@ -134,7 +133,7 @@ class Database():
             return self.tables[name]
         
         finally:
-            self.lock_manager.release_lock(tid, self.db_id, 'S')
+            self.lock_manager.release_lock(tid, self.path, 'S')
         
     def __remove_db_path(self):
         if os.path.exists(self.path):
