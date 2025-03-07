@@ -9,18 +9,21 @@ class TransactionWorker:
     """
     # Creates a transaction worker object.
     """
-    def __init__(self, transactions = None):
+    def __init__(self, transactions = None, lock_manager = None):
         self.stats = []
         self.transactions = transactions if transactions is not None else []
         self.result = 0
         self.worker_thread = None
         self.lock = threading.Lock()
+        self.lock_manager = lock_manager
+        self.transaction_errors = {}
 
 
     """
     Appends t to transactions
     """
     def add_transaction(self, t):
+        t.lock_manager = self.lock_manager
         self.transactions.append(t)
     
     """

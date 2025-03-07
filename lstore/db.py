@@ -16,6 +16,9 @@ class Database():
         self.no_path_set = True
         self.lock_manager = LockManager()
         atexit.register(self.__remove_db_path)
+
+        self.lock_manager = LockManager()
+        self.db_lock = threading.Lock()  # For database-level operations
         
 
     def open(self, path):
@@ -38,7 +41,7 @@ class Database():
 
                 # loops through tables and adds them to the self.tables dictionary
                 for table_name, table_info in tables_metadata.items():
-                    table = Table(table_name, table_info["num_columns"], table_info["key_index"], self.path)
+                    table = Table(table_name, table_info["num_columns"], table_info["key_index"], self.path, self.lock_manager)
                     self.tables[table_name] = table
 
                     # restore table metadata
@@ -77,63 +80,55 @@ class Database():
     :param num_columns: int     #Number of Columns: all columns are integer
     :param key: int             #Index of table key in columns
     """
-    def create_table(self, name, num_columns, key_index):
+    def create_table(self, name, num_columns, key_index, tid = None):
 
-        tid = threading.get_ident()
-        
-        try:
-            self.lock_manager.acquire_lock(tid, self.path, 'IX')
-
+        if tid:
+            self.lock_manager.acquire_lock(tid, 'DB', 'IX')
+            
+        with self.db_lock:
             if self.tables.get(name) is not None:
                 raise NameError(f"Error creating Table! Following table already exists: {name}")
 
-            self.tables[name] = Table(name, num_columns, key_index, self.path)
+            self.tables[name] = Table(name, num_columns, key_index, self.path, self.lock_manager)
+            
+            if tid:
+                self.lock_manager.acquire_lock(tid, name, 'X')
+                
             return self.tables[name]
-        
-        finally:
-            self.lock_manager.release_lock(tid, self.path, 'IX')
 
     
     """
     # Deletes the specified table
     """
-    def drop_table(self, name):
+    def drop_table(self, name, tid = None):
 
-        tid = threading.get_ident()
-
-        try:
-            self.lock_manager.acquire_lock(tid, self.path, 'IX')
-
+        if tid:
+            self.lock_manager.acquire_lock(tid, 'DB', 'IX')
+            self.lock_manager.acquire_lock(tid, name, 'X')
+            
+        with self.db_lock:
             if self.tables.get(name) is None:
                 raise NameError(f"Error dropping Table! Following table does not exist: {name}")
             
-            table = self.tables[name]
-            self.lock_manager.acquire_lock(tid, table.name, 'X')
-            
             del self.tables[name]
-
-        finally:
-            self.lock_manager.release_lock(tid, table.name, 'X')
-            self.lock_manager.release_lock(tid, self.path, 'IX')
 
     
     """
     # Returns table with the passed name
     """
-    def get_table(self, name):
+    def get_table(self, name, tid = None, lock_type = 'IS'):
 
-        tid = threading.get_ident()
-
-        try:
-            self.lock_manager.acquire_lock(tid, self.path, 'S')
-
+        if tid:
+            self.lock_manager.acquire_lock(tid, 'DB', lock_type)
+            # Acquire appropriate lock on the table based on intention
+            table_lock_type = 'S' if lock_type == 'IS' else 'IX'
+            self.lock_manager.acquire_lock(tid, name, table_lock_type)
+            
+        with self.db_lock:
             if self.tables.get(name) is None:
                 raise NameError(f"Error getting Table! Following table does not exist: {name}")
             
             return self.tables[name]
-        
-        finally:
-            self.lock_manager.release_lock(tid, self.path, 'S')
         
     def __remove_db_path(self):
         if os.path.exists(self.path):
