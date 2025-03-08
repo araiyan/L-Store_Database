@@ -290,7 +290,3 @@ class Table:
                     logical_rid = page_range.bufferpool.read_page_slot(page_range_idx, INDIRECTION_COLUMN, logical_page_index, logical_page_slot)
             
                 self.deallocation_base_rid_queue.task_done()
-
-    def get_transaction_id(self):
-        # will implement after figuring out transaction id
-        pass
