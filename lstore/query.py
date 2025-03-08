@@ -3,6 +3,8 @@ from lstore.config import *
 
 from time import time
 from queue import Queue
+from time import sleep
+import threading
 
 class Query:
     """
