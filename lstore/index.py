@@ -20,17 +20,13 @@ class Index:
         self.table = table
 
         self.lock_manager = table.lock_manager
-        #self.lock_manager = LockManager()
+
         # self.transaction_locks = {transaction1: {index_id1: locktype}}
         self.transaction_locks = {}
         self.record_transaction_lock = threading.Lock()
         self.serialize_lock = threading.Lock()
 
-        has_stored_index  = self.__generate_primary_index()
-
-        if not has_stored_index:
-            self.indices[self.key] = OOBTree()
-            #self.create_index(self.key)
+        self.indices[self.key] = OOBTree()
 
 
     """
@@ -40,14 +36,14 @@ class Index:
     # keep tracks of locks used and only release at the end
 
     def locate(self, column, value):
-
-        transaction_id = self.table.get_transaction_id()
+        transaction_id = threading.get_ident()
         self.__lock_index(column, "S", transaction_id)
 
         if self.indices[column] is None:
             return False
             
         rid = list(self.indices[column].get(value, [])) or None
+        #self.lock_manager.release_all_locks(transaction_id)
         return rid
 
     
@@ -58,13 +54,13 @@ class Index:
 
     def locate_range(self, begin, end, column):
 
-        transaction_id = self.table.get_transaction_id()
-
+        transaction_id = threading.get_ident()
         self.__lock_index(column, "S", transaction_id)
         if self.indices[column] == None:
             return False
         
         rid = [rid for sublist in self.indices[column].values(min=begin, max=end) for rid in sublist.keys()] or None
+        #self.lock_manager.release_all_locks(transaction_id)
         return rid
 
 
@@ -76,7 +72,7 @@ class Index:
 
         if self.indices[column_number] == None:
 
-            transaction_id = self.table.get_transaction_id()
+            transaction_id = threading.get_ident()
 
             #lock the entire index that's getting created
             self.__lock_index(column_number, "X", transaction_id)
@@ -145,8 +141,11 @@ class Index:
                 #insert {primary_index: {rid: True}} into primary index BTree
                 self.insert_to_index(column_number, column_value, rid)
 
+            #self.lock_manager.release_all_locks(transaction_id)
             return True
         else:
+
+            #self.lock_manager.release_all_locks(transaction_id)
             return False
 
 
@@ -155,7 +154,7 @@ class Index:
     """
     def drop_index(self, column_number):
 
-        transaction_id = self.table.get_transaction_id()
+        transaction_id = threading.get_ident()
 
         if column_number >= self.table.num_columns:
             return False
@@ -167,9 +166,10 @@ class Index:
             self.indices[column_number].clear()
             self.indices[column_number] = None
 
+            #self.lock_manager.release_all_locks(transaction_id)
             return True
-        # if the index trying to drop doesn't exist in the dict of secondary indices
         else:
+            #self.lock_manager.release_all_locks(transaction_id)
             return False
 
     
@@ -204,8 +204,7 @@ class Index:
     """
     def insert_in_all_indices(self, columns):
 
-        transaction_id = self.table.get_transaction_id()
-
+        transaction_id = threading.get_ident()
         self.__lock_index(self.key, "S", transaction_id)
         self.__lock_index(self.key, "IX", transaction_id)
 
@@ -217,18 +216,19 @@ class Index:
         for i in range(self.num_columns):
 
             if self.indices[i] != None:
-
-
                 column_value = columns[i + NUM_HIDDEN_COLUMNS]
                 rid = columns[RID_COLUMN]
 
                 if i == self.key:
-                    self.__update_lock_index(transaction_id, i, "IX", "X")
+                    self.__lock_index_tuple(i, columns[i + NUM_HIDDEN_COLUMNS], "X", transaction_id)
                 else:
-                    self.__lock_index(i, "X", transaction_id)
+                    self.__lock_index(i, "S", transaction_id)
+                    self.__lock_index(i, "IX", transaction_id)
+                    self.__lock_index_tuple(i, columns[i + NUM_HIDDEN_COLUMNS], "X", transaction_id)
 
                 self.insert_to_index(i, column_value, rid)
 
+        #self.lock_manager.release_all_locks(transaction_id)
         return True
 
     """
@@ -236,7 +236,7 @@ class Index:
     """
     def delete_from_all_indices(self, primary_key, prev_columns):
 
-        transaction_id = self.table.get_transaction_id()
+        transaction_id = threading.get_ident()
         self.__lock_index(self.key, "S", transaction_id)
         self.__lock_index(self.key, "IX", transaction_id)
 
@@ -250,14 +250,17 @@ class Index:
             if (self.indices[i] != None) and (prev_columns[i] != None):
 
                 if i == self.key:
-                    self.__update_lock_index(transaction_id, i, "IX", "X")
+                    self.__lock_index_tuple(i, prev_columns[i], "X", transaction_id)
                 else:
-                    self.__lock_index(i, "X", transaction_id)
+                    self.__lock_index(i, "S", transaction_id)
+                    self.__lock_index(i, "IX", transaction_id)
+                    self.__lock_index_tuple(i, prev_columns[i], "X", transaction_id)
 
                 del self.indices[i][prev_columns[i]][rid]
                 if self.indices[i][prev_columns[i]] == {}:
                     del self.indices[i][prev_columns[i]]
 
+        #self.lock_manager.release_all_locks(transaction_id)
         return True
     
     """
@@ -265,7 +268,7 @@ class Index:
     """
     def update_all_indices(self, primary_key, new_columns, prev_columns):
 
-        transaction_id = self.table.get_transaction_id()
+        transaction_id = threading.get_ident()
         self.__lock_index(self.key, "S", transaction_id)
         self.__lock_index(self.key, "IX", transaction_id)
 
@@ -278,7 +281,8 @@ class Index:
 
             rid = list(self.indices[self.key][primary_key].keys())[0]
 
-            self.__update_lock_index(transaction_id, self.key, "IX", "X")
+            self.__lock_index_tuple(self.key, primary_key, "X", transaction_id)
+            self.__lock_index_tuple(self.key, new_columns[self.key + NUM_HIDDEN_COLUMNS], "X", transaction_id)
 
             self.insert_to_index(self.key, new_columns[self.key + NUM_HIDDEN_COLUMNS], rid)
             del self.indices[self.key][primary_key]
@@ -289,7 +293,10 @@ class Index:
         for i in range(0, self.num_columns):
             if (new_columns[NUM_HIDDEN_COLUMNS + i] != None) and (self.indices[i] != None) and (prev_columns[i] != None) and (i != self.key):
                     
-                    self.__lock_index(i, "X", transaction_id)
+                    self.__lock_index(i, "S", transaction_id)
+                    self.__lock_index(i, "IX", transaction_id)
+                    self.__lock_index_tuple(i, prev_columns[i], "X", transaction_id)
+                    self.__lock_index_tuple(i, new_columns[i + NUM_HIDDEN_COLUMNS], "X", transaction_id)
 
                     key = prev_columns[i]
                     rid = list(self.indices[self.key][new_columns[self.key + NUM_HIDDEN_COLUMNS]].keys())[0]
@@ -306,12 +313,13 @@ class Index:
                     
                             del self.indices[i][key]
 
+        #self.lock_manager.release_all_locks(transaction_id)
         return True
     
 
     def grab_all(self):
 
-        transaction_id = self.table.get_transaction_id()
+        transaction_id = threading.get_ident()
         self.__lock_index(self.key, "S", transaction_id)
 
         all_rid = []
@@ -322,6 +330,7 @@ class Index:
         return all_rid
         
     # use this when open db
+    """
     def __generate_primary_index(self):
 
         #get base rid for every record with no duplicates
@@ -329,7 +338,7 @@ class Index:
         if not all_base_rids:
             return False
         
-        transaction_id = self.table.get_transaction_id()
+        transaction_id = threading.get_ident()
         self.__lock_index(self.key, "X", transaction_id)
 
         self.indices[self.key] = OOBTree()
@@ -358,6 +367,7 @@ class Index:
             self.table.bufferpool.mark_frame_used(frame)
 
         return True
+    """
     
     # call "index:": self.index.serialize() from table
     # pickle every index BTree and then store them in base64
@@ -385,7 +395,7 @@ class Index:
 
     def exist_index(self, column_number):
 
-        transaction_id = self.table.get_transaction_id()
+        transaction_id = threading.get_ident()
         self.__lock_index(column_number, "S", transaction_id)
 
         if self.indices[column_number] != None:
@@ -416,7 +426,7 @@ class Index:
 
     def __lock_index_tuple(self, column_number, column_value, lock_type, transaction_id):
         index_tuple_id = f"index{column_number}_{column_value}"
-        self.lock_manager.acquire_lock(transaction_id, index_tuple_id, lock_type)
+        self.__check_and_lock(transaction_id, index_tuple_id, lock_type)
     
     def get_index_id(self, column_number):
         return f"index{column_number}"
@@ -426,9 +436,9 @@ class Index:
             self.lock_manager.acquire_lock(transaction_id, record_id, lock_type)
             self.__record_lock_acquiring(transaction_id, record_id, lock_type)
     
-    # self.transaction_locks = {transaction1: {index_id1: "S", "IX", "IS"...}}
+    # self.transaction_locks = {transaction1: {index_id1: ["S", "IX", "IS"...]}}
     def __contains_lock(self, transaction_id, index_id, lock_type):
-        if index_id in self.transaction_locks[transaction_id] and lock_type in self.transaction_locks[transaction_id].get(index_id, []):
+        if transaction_id in self.transaction_locks and index_id in self.transaction_locks[transaction_id] and lock_type in self.transaction_locks[transaction_id].get(index_id, []):
             return True
         else:
             return False
