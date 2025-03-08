@@ -15,6 +15,7 @@ class TransactionWorker:
         self.result = 0
         self.worker_thread = None
         self.lock = threading.Lock()
+        self.transaction_errors = {} 
 
 
     """
