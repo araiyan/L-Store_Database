@@ -21,7 +21,7 @@ class Transaction:
     # t.add_query(q.update, grades_table, 0, *[None, 1, None, 2, None])
     """
     def add_query(self, query, table, *args):
-        self.queries.append((query, args))
+        self.queries.append((query, table, args))
         # use grades_table for aborting
 
         
@@ -30,8 +30,7 @@ class Transaction:
         try:
             for query, table, args in self.queries:
                 self.__acquireLocks(query, table, args)
-                
-                result = query(table, *args)
+                result = query(*args)
                 if result == False:
                     return self.abort()
             
@@ -44,46 +43,62 @@ class Transaction:
     
     def abort(self):
         #TODO: do roll-back and any other necessary operations
+
+        if self.lock_manager:
+            self.lock_manager.release_all_locks(self.tid)
+
         return False
 
     
     def commit(self):
         # TODO: commit to database
+        if self.lock_manager:
+            self.lock_manager.release_all_locks(self.tid)
+
+        
         return True
 
     def __acquireLocks(self, query, table, args):
-        """Acquire appropriate locks based on the operation type"""
         operation_type = self.__determineOperation(query)
         
-        # DB
-        db_lock_type = 'IS' if operation_type == 'read' else 'IX'
-        self.lock_manager.acquire_lock(self.tid, 'DB', db_lock_type)
-        
-        # Table
-        table_lock_type = 'S' if operation_type == 'read' else 'IX'
-        self.lock_manager.acquire_lock(self.tid, table.name, table_lock_type)
-        
-        # Record
-        ## Read
-        if operation_type == 'read':
-            if hasattr(query, '__name__') and query.__name__ == 'select':
-                key = args[0]
-                rid = table.index.locate(key)
+        try:
+            # DB
+            db_lock_type = 'IS' if operation_type == 'read' else 'IX'
+            self.lock_manager.acquire_lock(self.tid, 'DB', db_lock_type)
+            
+            # Table
+            table_lock_type = 'IS' if operation_type == 'read' else 'IX'
+            self.lock_manager.acquire_lock(self.tid, table.name, table_lock_type)
+            
+            # Record
+            ## Read
+            if operation_type == 'read':
+                if hasattr(query, '__name__') and query.__name__ == 'select':
+                    key = args[0]
+                    rid_list = table.index.locate(table.key, key)
+                    
+                    if rid_list is not None:
+                        for rid in rid_list:
+                            self.lock_manager.acquire_lock(self.tid, rid, 'S')
 
-                if rid is not None:
-                    self.lock_manager.acquire_lock(self.tid, rid, 'S')
-        
-        ## Write
-        else:
-            if hasattr(query, '__name__'):
-                if query.__name__ == 'insert':
-                    pass
+            ## Write         
+            else:  
+                if hasattr(query, '__name__'):
+                    if query.__name__ == 'insert':
+                        pass
 
-                elif query.__name__ in ['update', 'delete']:
-                    key = args[0]  # Assuming key is the first argument
-                    rid = table.index.locate(key)
-                    if rid is not None:
-                        self.lock_manager.acquire_lock(self.tid, rid, 'X')
+                    elif query.__name__ in ['update', 'delete']:
+                        key = args[0]
+                        rid_list = table.index.locate(table.key, key)
+                        
+                        if rid_list is not None:
+                            for rid in rid_list:
+                                self.lock_manager.acquire_lock(self.tid, rid, 'X')
+                                
+        except Exception as e:
+            print(f"Lock acquisition failed: {e}")
+            raise e
+
     
     def __determineOperation(self, query):
         if hasattr(query, '__name__'):

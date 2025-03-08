@@ -3,6 +3,7 @@ from lstore.page_range import PageRange, MergeRequest
 from time import time
 from lstore.config import *
 from lstore.bufferpool import BufferPool
+from lstore.lock import LockManager
 import json
 import os
 import threading
@@ -28,7 +29,7 @@ class Table:
     :param key: int             #Index of table(primary) key in column
     :db_path: string            #Path to the database directory where the table's data will be stored.
     """
-    def __init__(self, name, num_columns, key, db_path, lock_manager):
+    def __init__(self, name, num_columns, key, db_path, lock_manager:LockManager):
         if (key < 0 or key >= num_columns):
             raise ValueError("Error Creating Table! Primary Key must be within the columns of the table")
 
@@ -39,7 +40,7 @@ class Table:
         self.num_columns = num_columns
         self.total_num_columns = num_columns + NUM_HIDDEN_COLUMNS
 
-        self.lock_manager = lock_manager
+        self.lock_manager:LockManager = lock_manager
         self.table_lock = threading.RLock()  # Reentrant lock for table-level operations 
 
         self.page_directory = {}
@@ -95,11 +96,8 @@ class Table:
         page_slot = rid % MAX_RECORD_PER_PAGE
         return (page_range_index, page_index, page_slot)
 
-    def insert_record(self, record: Record, tid = None):
+    def insert_record(self, record: Record):
 
-        if tid and self.lock_manager:
-            self.lock_manager.acquire_lock(tid, record.rid, 'X')
-        
         page_range_index, page_index, page_slot = self.get_base_record_location(record.rid)
 
         if (page_range_index >= len(self.page_ranges)):
@@ -113,10 +111,7 @@ class Table:
             record.columns[TIMESTAMP_COLUMN] = current_page_range.tps
         current_page_range.write_base_record(page_index, page_slot, record.columns)
 
-    def update_record(self, rid, columns, tid = None) -> bool:
-
-        if tid and self.lock_manager:
-            self.lock_manager.acquire_lock(tid, rid, 'X')
+    def update_record(self, rid, columns) -> bool:
 
         '''Updates a record given its RID'''
         page_range_index = rid // MAX_RECORD_PER_PAGE_RANGE
