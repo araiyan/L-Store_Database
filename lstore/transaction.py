@@ -10,7 +10,6 @@ class Transaction:
     def __init__(self):
         self.queries = []
         self.log = []
-        self.lock_managers = {}
 
     """
     # Adds the given query to this transaction
@@ -39,12 +38,6 @@ class Transaction:
 
 
         for query, table, args in self.queries:
-            
-            # add lock manager (based on table) if not found, otherwise set lock_manager
-            if table.name not in self.lock_managers:
-                self.lock_managers[table.name] = table.lock_manager
-            
-            lock_manager = self.lock_managers[table.name]
 
             # set table and record lock types
             if query.__name__ in ["select", "select_version", "sum", "sum_version"]:
@@ -57,7 +50,7 @@ class Transaction:
             # acquire lock on table if not present
             if table.name not in locked_tables:
                 try: 
-                    lock_manager.acquire_lock(transaction_id, table.name, table_lock_type)
+                    table.lock_manager.acquire_lock(transaction_id, table.name, table_lock_type)
                     locked_tables.add(table.name)
                 except Exception:
                     # raise ValueError(f"Transaction {transaction_id} failed to acquire lock: {e}")
@@ -72,7 +65,7 @@ class Transaction:
                 for rid in rids:
                     if rid not in locked_records_rid:
                         try:
-                            lock_manager.acquire_lock(transaction_id, rid, record_lock_type)
+                            table.lock_manager.acquire_lock(transaction_id, rid, record_lock_type)
                             locked_records_rid.add(rid)
                         except Exception:
                             return self.abort()
@@ -83,7 +76,7 @@ class Transaction:
 
                 if primary_key not in locked_records_pk:
                     try:
-                        lock_manager.acquire_lock(transaction_id, primary_key, record_lock_type)
+                        table.lock_manager.acquire_lock(transaction_id, primary_key, record_lock_type)
                         locked_records_pk.add(primary_key)
                     except Exception:
                         return self.abort()
@@ -115,6 +108,9 @@ class Transaction:
         '''Rolls back the transaction and releases all locks'''
 
         #TODO: do roll-back and any other necessary operations
+        transaction_id = id(self)
+        for query, table, args in self.queries:
+            table.lock_manager.release_all_locks(transaction_id)
         return False
 
     
@@ -123,8 +119,8 @@ class Transaction:
 
         transaction_id = id(self)
    
-        for lock_manager in self.lock_managers.values():
-            lock_manager.release_all_locks(transaction_id)
+        for query, table, args in self.queries:
+            table.lock_manager.release_all_locks(transaction_id)
 
         self.log.clear()
         return True
