@@ -80,7 +80,7 @@ class Database():
         if self.tables.get(name) is not None:
             raise NameError(f"Error creating Table! Following table already exists: {name}")
 
-        self.tables[name] = Table(name, num_columns, key_index, self.path)
+        self.tables[name] = Table(name, num_columns, key_index, self.path, self.lock_manager)
         return self.tables[name]
 
     
