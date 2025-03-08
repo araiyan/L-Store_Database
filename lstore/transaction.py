@@ -70,7 +70,7 @@ class Transaction:
                         except Exception:
                             return self.abort()
                         
-            # otherwise lock based on primary key
+            # otherwise lock based on primary key (update, insert, delete)
             else:
                 primary_key = args[0]
 
@@ -109,8 +109,7 @@ class Transaction:
 
         #TODO: do roll-back and any other necessary operations
         transaction_id = id(self)
-        for query, table, args in self.queries:
-            table.lock_manager.release_all_locks(transaction_id)
+        self.queries[0][1].lock_manager.release_all_locks(transaction_id)
         return False
 
     
@@ -118,9 +117,9 @@ class Transaction:
         '''Commits the transaction and releases all locks'''
 
         transaction_id = id(self)
-   
-        for query, table, args in self.queries:
-            table.lock_manager.release_all_locks(transaction_id)
+
+        # release_all_locks called on one table since lock_manager is shared globally
+        self.queries[0][1].lock_manager.release_all_locks(transaction_id)
 
         self.log.clear()
         return True
