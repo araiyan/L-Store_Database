@@ -6,16 +6,32 @@ class Latch:
     def __init__(self, count=0):
         self.count = count
         self.lock = threading.Condition()
+        self.writing = False
 
     def count_down(self):
         with self.lock:
+            while self.writing:
+                self.lock.wait()
             self.count -= 1
             if self.count <= 0:
                 self.lock.notify_all()
 
     def count_up(self):
         with self.lock:
+            while self.writing:
+                self.lock.wait()
             self.count += 1
+
+    def acquire_write_lock(self):
+        with self.lock:
+            while self.writing or self.count > 0:
+                self.lock.wait()
+            self.writing = True
+    
+    def release_write_lock(self):
+        with self.lock:
+            self.writing = False
+            self.lock.notify_all()
 
     def await_latch(self):
         with self.lock:
@@ -176,11 +192,11 @@ class LockManager:
             self.condition.notify_all()
 
             self.wait_for_graph.remove_transaction(transaction_id)
-            self.transaction_states[transaction_id] = 'shrinking'
+            del self.transaction_states[transaction_id]
 
     def upgrade_lock(self, transaction_id, record_id, current_lock_type, new_lock_type):
         """
-        Upgrades a IS or IX lock to its respective S or X lock.
+        Upgrades a IS or IX lock to its respective S or X lock or S lock to an X lock.
         """
         with self.condition:
             if current_lock_type == 'IX' and new_lock_type == 'X':
@@ -203,6 +219,21 @@ class LockManager:
                 
                 self.lock_table[record_id]['IS'].count_down()
                 self.lock_table[record_id]['S'].add(transaction_id)
+            elif current_lock_type == 'S' and new_lock_type == 'X':
+                # Wait until no other transaction holds a conflicting lock
+                while self.lock_table[record_id]['X'] or self.lock_table[record_id]['IS'].count > 0:
+                    other_transaction = next(iter(self.lock_table[record_id]['X']))
+                    if self.wait_for_graph.add_edge(transaction_id, other_transaction):
+                        self.condition.wait()
+                    else:
+                        self.release_all_locks(transaction_id)
+                        raise Exception(f"Deadlock detected grabbing exclusive lock - Transaction {transaction_id} is waiting for {other_transaction}")
+
+                if not (transaction_id in self.lock_table[record_id]['S']):
+                    raise ValueError("Transaction does not hold an S lock")
+                
+                self.lock_table[record_id]['S'].remove(transaction_id)
+                self.lock_table[record_id]['X'].add(transaction_id)
             else:
                 raise ValueError("Invalid lock upgrade")
             self.condition.notify_all()
