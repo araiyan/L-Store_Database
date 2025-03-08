@@ -188,7 +188,7 @@ class LockManager:
                 while self.lock_table[record_id]['S'] or self.lock_table[record_id]['X'] or self.lock_table[record_id]['IS'].count > 0:
                     self.condition.wait()
 
-                if not (transaction_id in self.lock_table[record_id]['IX']):
+                if not self.lock_table[record_id]['IX'].count > 0:
                     raise ValueError("Transaction does not hold an IX lock")
                     
                 self.lock_table[record_id]['IX'].count_down()
@@ -198,7 +198,7 @@ class LockManager:
                 while self.lock_table[record_id]['X']:
                     self.condition.wait()
 
-                if not (transaction_id in self.lock_table[record_id]['IS']):
+                if not self.lock_table[record_id]['IS'].count > 0:
                     raise ValueError("Transaction does not hold an IS lock")
                 
                 self.lock_table[record_id]['IS'].count_down()
