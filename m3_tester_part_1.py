@@ -8,12 +8,6 @@ from random import choice, randint, sample, seed
 db = Database()
 db.open('./ECS165')
 
-# remove existing table if present
-try:
-    db.drop_table("Grades")
-except NameError:
-    pass
-
 # creating grades table
 grades_table = db.create_table('Grades', 5, 0)
 
