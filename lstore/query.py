@@ -1,7 +1,7 @@
 from lstore.table import Table, Record
 from lstore.config import *
 
-from time import time
+from time import sleep, time
 from queue import Queue
 
 class Query:
@@ -24,7 +24,7 @@ class Query:
     """
 
     # Delete was simplified to just locate rid and put it on the queue, then deleting indices. Actual process will occur in merge function
-    def delete(self, primary_key):
+    def delete(self, primary_key, log_entry=None):
 
         # Locate the RID associated with the primary key
         base_rid = self.table.index.locate(self.table.key, primary_key)
@@ -32,6 +32,24 @@ class Query:
             return False  # Record does not exist
         
         prev_columns = self.__get_prev_columns(base_rid[0], *self.table.index.indices)
+
+        # log deletion before it is removed
+        if log_entry:
+            index_changes = []
+            for col_index, index in enumerate(self.table.index.indices):
+                if index:
+
+                    # for tuple: column, old_value, new_value (None)
+                    index_changes.append((col_index, prev_columns[col_index], None))
+
+            log_entry["changes"].append({
+                "type": "delete",
+                "rid": base_rid[0],
+                "table": self.table.name,
+                "prev_columns": prev_columns,
+                "page_range": base_rid[0] // MAX_RECORD_PER_PAGE_RANGE,
+                "index_changes": index_changes
+            })
 
         self.table.deallocation_base_rid_queue.put(base_rid[0])
 
@@ -43,7 +61,7 @@ class Query:
     # Return True upon succesful insertion
     # Returns False if insert fails for whatever reason
     """
-    def insert(self, *columns):
+    def insert(self, *columns, log_entry=None):
 
         if (self.table.index.locate(self.table.key, columns[self.table.key])):
             return False
@@ -66,6 +84,24 @@ class Query:
     
         self.table.insert_record(record)
         self.table.index.insert_in_all_indices(record.columns)
+
+        # log insert
+        if log_entry:
+            index_changes = []
+            for col_index, index in enumerate(self.table.index.indices):
+                if index:
+                    
+                    # for tuple: column, old_value (None), new_value
+                    index_changes.append((col_index, None, columns[col_index]))
+
+            log_entry["changes"].append({
+                "type": "insert",
+                "rid": record.rid,
+                "table": self.table.name,
+                "columns": columns,
+                "page_range": record.rid // MAX_RECORD_PER_PAGE_RANGE,
+                "index_changes": index_changes
+            })
 
         return True
 
@@ -185,7 +221,7 @@ class Query:
     # Returns True if update is succesful
     # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking (Ignore this for now)
     """
-    def update(self, primary_key, *columns):
+    def update(self, primary_key, *columns, log_entry=None):
         rid_location = self.table.index.locate(self.table.key, primary_key)
         if rid_location is None:
             return False
@@ -238,6 +274,24 @@ class Query:
         self.table.index.update_all_indices(primary_key, new_columns, prev_columns)
         # print("Update Successful\n")
 
+        # log update changes
+        if log_entry:
+            index_changes = []
+            for col_index, index in enumerate(self.table.index.indices):
+                if index and prev_columns[col_index] != columns[col_index]:
+
+                    # for tuple: column, old_value, new_value
+                    index_changes.append((col_index, prev_columns[col_index], columns[col_index]))
+                    
+            log_entry["changes"].append({
+                "type": "update",
+                "rid": rid_location[0],
+                "prev_tail_rid": prev_tail_rid,
+                "table": self.table.name,
+                "prev_columns": prev_columns,
+                "page_range": page_range_index,
+                "index_changes": index_changes
+            })
         return True
 
 

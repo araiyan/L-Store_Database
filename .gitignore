@@ -4,3 +4,4 @@
 *.bin
 ECS165/tables.json
 lstore.zip
+transaction_copy.py

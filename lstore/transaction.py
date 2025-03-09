@@ -162,3 +162,4 @@ class Transaction:
 
         self.log.clear()
         return True
+
