@@ -56,7 +56,7 @@ class TransactionWorker:
 
                 logging.error(f"Transaction {transaction_id} failed with error: {str(e)}")
                 self.stats.append(False)
-                self.transaction_errors[transaction_id] = str(e)
+                #self.transaction_errors[transaction_id] = str(e)
 
             self.stats.append(result)
 

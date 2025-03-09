@@ -445,9 +445,9 @@ class Query:
                 
             # Release locks if this is a standalone query
             if standalone:
-                self.lock_manager.release_lock(transaction_id, self.table.name, "IS")
                 for rid in locked_rids:
                     self.lock_manager.release_lock(transaction_id, rid, "S")
+                self.lock_manager.release_lock(transaction_id, self.table.name, "IS")
 
         return sum_total
 
