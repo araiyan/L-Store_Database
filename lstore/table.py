@@ -29,7 +29,7 @@ class Table:
     :param key: int             #Index of table(primary) key in column
     :db_path: string            #Path to the database directory where the table's data will be stored.
     """
-    def __init__(self, name, num_columns, key, db_path):
+    def __init__(self, name, num_columns, key, db_path, lock_manager:LockManager):
         if (key < 0 or key >= num_columns):
             raise ValueError("Error Creating Table! Primary Key must be within the columns of the table")
 
@@ -40,6 +40,7 @@ class Table:
         self.lock_manager = LockManager()
         self.num_columns = num_columns
         self.total_num_columns = num_columns + NUM_HIDDEN_COLUMNS
+        self.lock_manager:LockManager = lock_manager
 
         self.page_directory = {}
         '''

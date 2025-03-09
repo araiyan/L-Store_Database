@@ -162,9 +162,17 @@ class Query:
             return False
        """ 
 
-        rid_list = self.table.index.locate(search_key_index, search_key)
-        if not rid_list:
-            raise ValueError("No records found with the given key")
+        if not self.table.index.exist_index(search_key_index):
+
+            self.table.index.create_index(search_key_index)
+            rid_list = self.table.index.locate(search_key_index, search_key)
+            self.table.index.drop_index(search_key_index)
+
+        else:
+            rid_list = self.table.index.locate(search_key_index, search_key)
+        
+        if rid_list == None:
+            return []
         
         record_objs = []
 
@@ -267,7 +275,6 @@ class Query:
         
         rid_location = self.table.index.locate(self.table.key, primary_key)
         if rid_location is None:
-            print("Update Error: Record does not exist")
             return False
         
         new_columns = [None] * self.table.total_num_columns

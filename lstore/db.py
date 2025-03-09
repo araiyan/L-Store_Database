@@ -2,6 +2,7 @@ import os
 import json
 from lstore.table import Table
 from lstore.index import Index
+from lstore.lock import LockManager
 from BTrees.OOBTree import OOBTree
 import atexit
 import shutil
@@ -12,6 +13,7 @@ class Database():
         self.tables:dict = {}
         self.path = path
         self.no_path_set = True
+        self.lock_manager = LockManager()
         atexit.register(self.__remove_db_path)
         
 
@@ -35,7 +37,7 @@ class Database():
 
                 # loops through tables and adds them to the self.tables dictionary
                 for table_name, table_info in tables_metadata.items():
-                    table = Table(table_name, table_info["num_columns"], table_info["key_index"], self.path)
+                    table = Table(table_name, table_info["num_columns"], table_info["key_index"], self.path, self.lock_manager)
                     self.tables[table_name] = table
 
                     # restore table metadata
@@ -78,7 +80,7 @@ class Database():
         if self.tables.get(name) is not None:
             raise NameError(f"Error creating Table! Following table already exists: {name}")
 
-        self.tables[name] = Table(name, num_columns, key_index, self.path)
+        self.tables[name] = Table(name, num_columns, key_index, self.path, self.lock_manager)
         return self.tables[name]
 
     
