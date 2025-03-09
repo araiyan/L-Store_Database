@@ -45,22 +45,21 @@ class TransactionWorker:
     def __run(self):
 
         transactions_to_run = list(self.transactions) if len(self.transactions) > 0 else []
+        print("Running transactions")
         
         for transaction in transactions_to_run:
             transaction_id = id(transaction)
             result = None
             
             try:
-                
                 result = transaction.run()
+
                 self.stats.append(result)
                                 
             except Exception as e:
 
-                logging.error(f"Transaction {transaction_id} failed with error: {str(e)}")
+                print(f"Transaction {transaction_id} failed with error: {str(e)}")
                 self.stats.append(False)
                 self.transaction_errors[transaction_id] = str(e)
-
-            self.stats.append(result)
 
         self.result = len(list(filter(lambda x: x, self.stats)))

@@ -23,6 +23,7 @@ class Transaction:
         success = True
 
         for query, table, args in self.queries:
+            print(f"Querying {query} on {table} for {args}")
             if self.lock_manager is None:
                 self.lock_manager = table.lock_manager
                 self.lock_manager.transaction_states[self.tid] = 'growing'
@@ -34,7 +35,7 @@ class Transaction:
                 print(f"Transaction {self.tid} aborting due to lock acquisition error: {e}")
                 success = False
                 break
-
+            print(f"Querying {args}")
             result = query(*args)
             if result is False:
                 print(f"Transaction {self.tid} aborting due to query failure.")
@@ -72,12 +73,11 @@ class Transaction:
     def __acquireLocks(self, query, table, args):
         operation_type = self.__determineOperation(query)
         try:
-            
             # DB
             db_lock_type = 'IS' if operation_type == 'read' else 'IX'
             self.lock_manager.acquire_lock(self.tid, 'DB', db_lock_type)
 
-            # Table
+            # Record
             table_lock_type = 'IS' if operation_type == 'read' else 'IX'
             self.lock_manager.acquire_lock(self.tid, table.name, table_lock_type)
 
@@ -99,12 +99,21 @@ class Transaction:
                     elif query.__name__ in ['update', 'delete']:
                         key = args[0]
                         rid_list = table.index.locate(table.key, key)
+
                         if rid_list is not None:
                             for rid in rid_list:
-                                self.lock_manager.acquire_lock(self.tid, rid, 'X')
+                                
+                                try:
+                                    # See if we can upgrade from a shared to exclusive lock
+                                    self.lock_manager.upgrade_lock(self.tid, rid, 'S', 'X')
+                                
+                                except Exception as upgrade_error:
+                                    # If upgrade fails, try acquire an exclusive lock directly
+                                    self.lock_manager.acquire_lock(self.tid, rid, 'X')
         except Exception as e:
             print(f"Lock acquisition failed for transaction {self.tid}: {e}")
             raise e
+
 
     def __determineOperation(self, query):
         if hasattr(query, '__name__') and query.__name__ == 'select':
