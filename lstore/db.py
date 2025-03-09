@@ -17,8 +17,7 @@ class Database():
         self.lock_manager = LockManager()
         atexit.register(self.__remove_db_path)
 
-        self.lock_manager = LockManager()
-        self.db_lock = threading.Lock()  # For database-level operations
+        self.db_lock = threading.Lock()
         
 
     def open(self, path):
