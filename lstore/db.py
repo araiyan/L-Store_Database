@@ -4,7 +4,7 @@ from lstore.table import Table
 from lstore.index import Index
 from lstore.lock import LockManager
 import threading
-from BTrees.OOBTree import OOBTree # type: ignore
+from BTrees.OOBTree import OOBTree
 import atexit
 import shutil
 
