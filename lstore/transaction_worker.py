@@ -9,21 +9,19 @@ class TransactionWorker:
     """
     # Creates a transaction worker object.
     """
-    def __init__(self, transactions = None, lock_manager = None):
+    def __init__(self, transactions = None):
         self.stats = []
         self.transactions = transactions if transactions is not None else []
         self.result = 0
         self.worker_thread = None
         self.lock = threading.Lock()
-        self.lock_manager = lock_manager
-        self.transaction_errors = {}
+        self.transaction_errors = {} 
 
 
     """
     Appends t to transactions
     """
     def add_transaction(self, t):
-        t.lock_manager = self.lock_manager
         self.transactions.append(t)
     
     """
@@ -45,20 +43,19 @@ class TransactionWorker:
     def __run(self):
 
         transactions_to_run = list(self.transactions) if len(self.transactions) > 0 else []
-        print("Running transactions")
         
         for transaction in transactions_to_run:
             transaction_id = id(transaction)
             result = None
             
             try:
+                
                 result = transaction.run()
-
                 self.stats.append(result)
                                 
             except Exception as e:
 
-                print(f"Transaction {transaction_id} failed with error: {str(e)}")
+                logging.error(f"Transaction {transaction_id} failed with error: {str(e)}")
                 self.stats.append(False)
                 self.transaction_errors[transaction_id] = str(e)
 
