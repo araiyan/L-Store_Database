@@ -117,9 +117,6 @@ class Query:
     """
     def select(self, search_key, search_key_index, projected_columns_index):
         # retrieve a list of RIDs that contain the "search_key" value within the column as defined by "search_key_index"
-        print("Concurrency test 1")
-        sleep(1)
-        print("Concurrency test 2")
         return self.select_version(search_key, search_key_index, projected_columns_index, 0)
     
     """
