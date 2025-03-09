@@ -39,6 +39,7 @@ class Table:
         self.table_path = os.path.join(db_path, name)
         self.num_columns = num_columns
         self.total_num_columns = num_columns + NUM_HIDDEN_COLUMNS
+        self.lock_manager:LockManager = lock_manager
 
         self.lock_manager:LockManager = lock_manager
         self.table_lock = threading.RLock()  # Reentrant lock for table-level operations 
