@@ -168,16 +168,15 @@ class LockManager:
                 lock_types = list(self.lock_table[record_id].keys())
                 for lock_type in lock_types:
                     if lock_type in ['IS', 'IX']:
-                        while self.lock_table[record_id][lock_type].count > 0:
-                            self.lock_table[record_id][lock_type].count_down()
+                        self.lock_table[record_id][lock_type].count_down()
                     elif transaction_id in self.lock_table[record_id][lock_type]:
                         self.lock_table[record_id][lock_type].remove(transaction_id)
                         if not any(self.lock_table[record_id].values()):
                             del self.lock_table[record_id]
             self.condition.notify_all()
+
             self.wait_for_graph.remove_transaction(transaction_id)
-            if transaction_id in self.transaction_states:
-                del self.transaction_states[transaction_id]
+            self.transaction_states[transaction_id] = 'shrinking'
 
     def upgrade_lock(self, transaction_id, record_id, current_lock_type, new_lock_type):
         """

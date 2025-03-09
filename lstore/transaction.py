@@ -46,7 +46,7 @@ class Transaction:
 
         else:
             result = self.abort()
-            
+
         self.completed = True
 
         return result
@@ -76,12 +76,11 @@ class Transaction:
             # Record
             ## Read
             if operation_type == 'read':
-                if hasattr(query, '__name__') and query.__name__ == 'select':
-                    key = args[0]
-                    rid_list = table.index.locate(table.key, key)
-                    if rid_list is not None:
-                        for rid in rid_list:
-                            self.lock_manager.acquire_lock(self.tid, rid, 'S')
+                key = args[0]
+                rid_list = table.index.locate(table.key, key)
+                if rid_list is not None:
+                    for rid in rid_list:
+                        self.lock_manager.acquire_lock(self.tid, rid, 'S')
             
             ## Write
             else:
@@ -89,6 +88,7 @@ class Transaction:
                     if query.__name__ == 'insert':
                         # For insert, no record-level lock is needed since the record is new.
                         pass
+                    
                     elif query.__name__ in ['update', 'delete']:
                         key = args[0]
                         rid_list = table.index.locate(table.key, key)
