@@ -50,11 +50,6 @@ class TransactionWorker:
             try:
                 
                 result = transaction.run()
-                if result:
-                    transaction.commit()  # 🔹 Fix: Release locks after commit
-                else:
-                    transaction.abort()   # 🔹 Fix: Release locks on failure
-                
                 self.stats.append(result)
                                 
             except Exception as e:
@@ -62,11 +57,6 @@ class TransactionWorker:
                 logging.error(f"Transaction {transaction_id} failed with error: {str(e)}")
                 self.stats.append(False)
                 self.transaction_errors[transaction_id] = str(e)
-
-                self.stats.append(result)
-                transaction.abort()  # 🔹 Fix: Release locks on failure
-            
-
 
             self.stats.append(result)
 
