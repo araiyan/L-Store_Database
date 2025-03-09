@@ -52,15 +52,23 @@ class Transaction:
         return result
 
     def abort(self):
+
+        # Add existing abort code here, all I'm doing is releasing locks so I'm not undoing anything in log
         if self.lock_manager is not None:
             self.lock_manager.release_all_locks(self.tid)
         return False
 
     def commit(self):
+        
+        # Same here with adding commit code, not committing anytihng myself
         if self.lock_manager is not None:
             self.lock_manager.release_all_locks(self.tid)
         return True
 
+    """
+    The main idea is that we're doing all the lock acquisitions for queries in transaction.py is just because it's easier to follow.
+    I think it should be fine to retain the locks we currently have in db.py since they mutate the table rather than the records?
+    """
     def __acquireLocks(self, query, table, args):
         operation_type = self.__determineOperation(query)
         try:
@@ -86,7 +94,6 @@ class Transaction:
             else:
                 if hasattr(query, '__name__'):
                     if query.__name__ == 'insert':
-                        # For insert, no record-level lock is needed since the record is new.
                         pass
                     
                     elif query.__name__ in ['update', 'delete']:
