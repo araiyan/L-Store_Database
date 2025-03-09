@@ -1,14 +1,28 @@
 from lstore.table import Table, Record
 from lstore.index import Index
+from lstore.lock import LockManager
+from lstore.query import Query
+from lstore.transaction_log import TransactionLog
+import threading
+
+#thread_local_data = threading.local()
 
 class Transaction:
+    
+    log_manager = TransactionLog()
 
     """
     # Creates a transaction object.
     """
-    def __init__(self):
+    def __init__(self, lock_manager=None):
         self.queries = []
-        pass
+        self.transaction_id = id(self)
+        self.rollback_data = {}
+        self.acquired_locks = []
+        self.lock_manager = LockManager()  
+        self.log_manager = TransactionLog()
+        self.thread_data = threading.local()  #Store transaction state in thread-local storage
+
 
     """
     # Adds the given query to this transaction
@@ -18,7 +32,7 @@ class Transaction:
     # t.add_query(q.update, grades_table, 0, *[None, 1, None, 2, None])
     """
     def add_query(self, query, table, *args):
-        self.queries.append((query, args))
+        self.queries.append((query, table, args))
         # use grades_table for aborting
 
         
@@ -31,85 +45,85 @@ class Transaction:
     - Commits if all succeed
     """
     def run(self):
-        self.rollback_data = {}  # Reset rollback tracking
-        self.successful_operations = 0
+        """Executes the transaction while ensuring atomicity and isolation."""
+        self.rollback_data.clear()
+        self.acquired_locks.clear()
+        self.thread_data.active_transaction = self.transaction_id
         
-        for query, table, key, key_index, args in self.queries:
-            try:
+        try:
+            for query, table, args in self.queries:
+                 # set table and record lock types
+                if query.__name__ in ["select", "select_version", "sum", "sum_version"]:
+                    table_lock_type = "IS"
+                    record_lock_type = "S"
+                else: # update, delete, insert
+                    table_lock_type = "IX"
+                    record_lock_type = "X"
+                    
+                key = args[0] if args else None
+                self.lock_manager = table.lock_manager 
+                # Acquire necessary locks
                 if key is not None:
-                    if not Transaction.lock_manager.acquire_lock(self.transaction_id, key, 'X'):
+                    print(f"Transaction {self.transaction_id} trying to acquire lock on {key}...")
+                    if not self.lock_manager.acquire_lock(self.transaction_id, key, record_lock_type):  
                         print(f"Transaction {self.transaction_id} failed to acquire lock on {key}, aborting.")
                         return self.abort()
-
-                    self.acquired_locks.append(key)  # Track acquired lock
-
-                # Handle updates
-                if query.__name__ == "update":
-                    prev_values = self.query_handler.update(key, *args)  
-                    if prev_values:
-                        if key not in self.rollback_data:
-                            self.rollback_data[key] = []  # Initialize list
-                        self.rollback_data[key].append(('update', prev_values))
-
-                # Handle deletes
-                elif query.__name__ == "delete":
-                    prev_values = self.query_handler.delete(key)
-                    if prev_values:
-                        if key not in self.rollback_data:
-                            self.rollback_data[key] = []
-                        self.rollback_data[key].append(('delete', prev_values))
-
-                else:
-                    result = query(*((key,) if key is not None else ()) + args)
-                    if not result:
-                        print(f"Transaction {self.transaction_id} encountered an error, aborting.")
-                        return self.abort()
-
-                self.successful_operations += 1
-            except Exception as e:
-                print(f"Transaction {self.transaction_id} failed: {e}")
-                return self.abort()
-
-        return self.commit()
+                    print(f"Transaction {self.transaction_id} acquired lock on {key}.")
+                    self.acquired_locks.append(key)
+                                    
+                result = query(*args, transaction_id=self.transaction_id)
+                
+                if not result:
+                    print(f"Transaction {self.transaction_id} encountered an error, aborting.")
+                    return self.abort()
+                
+                # Log after state
+                before_state='none'
+                after_state='none'
+                #after_state = query_obj.select(key, table.key, [1] * table.num_columns) if key else None
+                self.log_manager.log_operation(self.transaction_id, query.__name__, key, before_state, after_state)
+                
+            return self.commit()
         
+        except Exception as e:
+            print(f"Transaction {self.transaction_id} failed: {e}")
+            return self.abort()
         
-        for query, args in self.queries:
-            result = query(*args)
-            # If the query has failed the transaction should abort
-            if result == False:
-                return self.abort()
-        return self.commit()
+        finally:
+            # 🔹 Remove transaction state after it finishes
+            if hasattr(self.thread_data, "active_transaction"):
+                del self.thread_data.active_transaction
 
     """
     Rolls back all executed operations and releases locks.
     Calls `rollback_update()` or `rollback_delete()` to restore previous values.
     """ 
     def abort(self):
-        #log_entries = self.log_manager.get_transaction_log(self.transaction_id) //TBD to go thru log to reverse
-        for rollback_key, prev_values_list in self.rollback_data.items():
-            for prev_values in reversed(prev_values_list):
-                self.query_handler.rollback_update(rollback_key, prev_values)  # Restore previous values
-
-            Transaction.lock_manager.release_lock(self.transaction_id, "record", rollback_key, "X")
-
-        # Release table-level locks
-        Transaction.lock_manager.release_lock(self.transaction_id, "table", self.table.name, "IX")
-
-        self.acquired_locks.clear()
+        """ Rolls back a transaction using the log and releases all locks."""
+        transaction_log_entries = self.log_manager.get_transaction_log(self.transaction_id)
+        for entry in reversed(transaction_log_entries):
+            table = entry['table']
+            if entry['operation'] == 'update':
+                table.update_record(entry['record_id'], entry['before'])
+            elif entry['operation'] == 'delete':
+                table.insert(*entry['before'])
+            elif entry['operation'] == 'insert':
+                table.delete(entry['record_id'])
+        
+        if hasattr(self, "lock_manager") and self.lock_manager:
+            self.lock_manager.release_all_locks(self.transaction_id)
+        self.log_manager.remove_transaction(self.transaction_id)
         print(f"Transaction {self.transaction_id} aborted and rolled back.")
         return False
 
     
     def commit(self):
-        """Commits the transaction and releases all acquired locks."""
-        for key in self.acquired_locks:
-            Transaction.lock_manager.release_lock(self.transaction_id, "record", key, "X")  # Release record-level locks
-
-        # Release table-level locks
-        Transaction.lock_manager.release_lock(self.transaction_id, "table", self.table.name, "IX")
-
-        self.acquired_locks.clear()
+        """ Commits the transaction and releases all acquired locks."""
+        self.lock_manager.release_all_locks(self.transaction_id)  
+        self.log_manager.remove_transaction(self.transaction_id)
         print(f"Transaction {self.transaction_id} committed successfully.")
+        
         return True
+
 
 

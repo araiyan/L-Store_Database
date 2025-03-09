@@ -44,22 +44,30 @@ class LockManager:
                 while self.lock_table[record_id]['S'] or self.lock_table[record_id]['X'] or self.lock_table[record_id]['IS'].count > 0 or self.lock_table[record_id]['IX'].count > 0:
                     self.condition.wait()
                 self.lock_table[record_id]['X'].add(transaction_id)
+                self.condition.notify_all()
+                return True 
             elif lock_type == 'S':
                 # print("Acquiring shared lock", self.lock_table[record_id]['X'], self.lock_table[record_id]['IX'].count)
                 # Wait until no other transaction holds an exclusive lock on the record
                 while self.lock_table[record_id]['X'] or self.lock_table[record_id]['IX'].count > 0:
                     self.condition.wait()
                 self.lock_table[record_id]['S'].add(transaction_id)
+                self.condition.notify_all()
+                return True 
             elif lock_type == 'IS':
                 # Wait until no other transaction holds an exclusive lock on the record
                 while self.lock_table[record_id]['X']:
                     self.condition.wait()
                 self.lock_table[record_id]['IS'].count_up()
+                self.condition.notify_all()
+                return True 
             elif lock_type == 'IX':
                 # Wait until no other transaction holds an exclusive lock on the record
                 while self.lock_table[record_id]['X']:
                     self.condition.wait()
                 self.lock_table[record_id]['IX'].count_up()
+                self.condition.notify_all()
+                return True 
             else:
                 raise ValueError("Invalid lock type")
 
@@ -124,4 +132,13 @@ class LockManager:
             else:
                 raise ValueError("Invalid lock upgrade")
             self.condition.notify_all()
+            
+    def has_lock(self, transaction_id, record_id, lock_type):
+        """ Checks if the transaction already holds the requested lock. """
+        with self.condition:
+            if lock_type in ['S', 'X']:
+                return transaction_id in self.lock_table[record_id][lock_type]
+            elif lock_type in ['IS', 'IX']:
+                return self.lock_table[record_id][lock_type].count > 0
+            return False
 

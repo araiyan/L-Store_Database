@@ -1,7 +1,9 @@
 from lstore.table import Table, Record
 from lstore.config import *
 from lstore.lock import LockManager
+from lstore.transaction_log import TransactionLog
 import threading
+#import lstore.transaction
 
 from time import time
 from queue import Queue
@@ -14,10 +16,10 @@ class Query:
     Any query that crashes (due to exceptions) should return False
     Supports rollback for transactional consistency.
     """
-    def __init__(self, table):
+    def __init__(self, table, log_manager=None):
         self.table:Table = table
-        self.lock_manager = table.db.lock_manager  # Access DB-level LockManager
-        pass
+        self.lock_manager = self.table.lock_manager 
+        self.log_manager = log_manager if log_manager else TransactionLog()  
 
     
     """
@@ -28,33 +30,44 @@ class Query:
     """
 
     # Delete was simplified to just locate rid and put it on the queue, then deleting indices. Actual process will occur in merge function
-    def delete(self, primary_key):
+    def delete(self, primary_key, transaction_id=None):
         """
         Marks a record for deletion but does not remove it immediately.
         Actual deletion occurs during the merge process.
         Returns True upon successful deletion, False if record does not exist.
         """
         """ Deletes a record with proper hierarchical locking. """
-        transaction_id = threading.get_ident()
+        standalone = False 
+        if transaction_id is None:
+            transaction_id = threading.get_ident()  # Fallback for standalone queries
+            standalone = True  # Flag to track standalone queries
 
-        # Acquire IX lock at the table level before getting an X lock at the record level
-        if not self.lock_manager.acquire_lock(transaction_id, self.table.name, "IX"):
-            return False  # Abort if IX lock is unavailable
-
-        # Acquire X lock at the record level
-        if not self.lock_manager.acquire_lock(transaction_id, primary_key, "X"):
-            return False  # Abort if X lock is unavailable
-
+        try:
+            if not self.lock_manager.has_lock(transaction_id, primary_key, "X"):  # Prevent self-deadlock
+                self.lock_manager.acquire_lock(transaction_id, self.table.name, "IX")  
+                self.lock_manager.acquire_lock(transaction_id, primary_key, 'X')
+        except Exception as e:
+            print(f" Failed to acquire lock for delete: {e}")
+            return False
         
         base_rid = self.table.index.locate(self.table.key, primary_key)
         if(base_rid is None):
             return False  # Record does not exist
         
+        #record = self.select(primary_key, self.table.key, [1] * self.table.num_columns)
+        #if not record:
+            #return False
         prev_columns = self.__get_prev_columns(base_rid[0], *self.table.index.indices)
 
         self.table.deallocation_base_rid_queue.put(base_rid[0])
 
         self.table.index.delete_from_all_indices(primary_key, prev_columns)
+        
+         # Release locks if this is a standalone query
+        if standalone:
+            self.lock_manager.release_lock(transaction_id, self.table.name, "IX")
+            self.lock_manager.release_lock(transaction_id, primary_key, "X")
+            
         return True
 
     """
@@ -62,8 +75,23 @@ class Query:
     # Return True upon succesful insertion
     # Returns False if insert fails for whatever reason
     """
-    def insert(self, *columns):
+    def insert(self, *columns, transaction_id=None):
 
+        """ Inserts a new record while ensuring transactional consistency."""
+        primary_key = columns[self.table.key]
+        standalone = False 
+        if transaction_id is None:
+            transaction_id = threading.get_ident()  # Fallback for standalone queries
+            standalone = True  # Flag to track standalone queries
+
+        try:
+            if not self.lock_manager.has_lock(transaction_id, primary_key, "X"):  # Prevent self-deadlock
+                self.lock_manager.acquire_lock(transaction_id, self.table.name, "IX")  
+                self.lock_manager.acquire_lock(transaction_id, primary_key, 'X')
+        except Exception as e:
+            print(f" Failed to acquire lock for insert: {e}")
+            return False
+        
         if (self.table.index.locate(self.table.key, columns[self.table.key])):
             return False
 
@@ -85,6 +113,11 @@ class Query:
     
         self.table.insert_record(record)
         self.table.index.insert_in_all_indices(record.columns)
+        
+        # Release locks if this is a standalone query
+        if standalone:
+            self.lock_manager.release_lock(transaction_id, self.table.name, "IX")
+            self.lock_manager.release_lock(transaction_id, primary_key, "X")
 
         return True
 
@@ -98,9 +131,9 @@ class Query:
     # Returns False if record locked by TPL
     # Assume that select will never be called on a key that doesn't exist
     """
-    def select(self, search_key, search_key_index, projected_columns_index):
+    def select(self, search_key, search_key_index, projected_columns_index, transaction_id=None):
         # retrieve a list of RIDs that contain the "search_key" value within the column as defined by "search_key_index"
-        return self.select_version(search_key, search_key_index, projected_columns_index, 0)
+        return self.select_version(search_key, search_key_index, projected_columns_index, 0, transaction_id)
     
     """
     # Read matching record with specified search key
@@ -112,7 +145,22 @@ class Query:
     # Returns False if record locked by TPL
     # Assume that select will never be called on a key that doesn't exist
     """
-    def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
+    def select_version(self, search_key, search_key_index, projected_columns_index, relative_version, transaction_id=None):
+        
+        """ Reads a record while acquiring shared locks."""
+        standalone = False 
+        if transaction_id is None:
+            transaction_id = threading.get_ident()  # Fallback for standalone queries
+            standalone = True  # Flag to track standalone queries
+        """
+        try:
+            if not self.lock_manager.has_lock(transaction_id, search_key, "S"):  # Prevent self-deadlock
+                self.lock_manager.acquire_lock(transaction_id, self.table.name, "IS")  
+                self.lock_manager.acquire_lock(transaction_id, search_key, 'S')
+        except Exception as e:
+            print(f" Failed to acquire lock for select: {e}")
+            return False
+       """ 
 
         rid_list = self.table.index.locate(search_key_index, search_key)
         if not rid_list:
@@ -187,7 +235,14 @@ class Query:
                             record_columns[i] = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + i, base_page_index, base_page_slot)
             
             record_objs.append(Record(rid, record_columns[self.table.key], record_columns))
-        
+            
+        # Release locks if this is a standalone query
+        """ 
+        if standalone:
+            if self.lock_manager.has_lock(transaction_id, search_key, "S"):
+                self.lock_manager.release_lock(transaction_id, self.table.name, "IS")
+                self.lock_manager.release_lock(transaction_id, search_key_index, "S")
+        """
         return record_objs
 
 
@@ -196,7 +251,20 @@ class Query:
     # Returns True if update is succesful
     # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking (Ignore this for now)
     """
-    def update(self, primary_key, *columns):
+    def update(self, primary_key, *columns, transaction_id=None):
+        standalone = False 
+        if transaction_id is None:
+            transaction_id = threading.get_ident()  # Fallback for standalone queries
+            standalone = True  # Flag to track standalone queries
+
+        try:
+            if not self.lock_manager.has_lock(transaction_id, primary_key, "X"):  # Prevent self-deadlock
+                self.lock_manager.acquire_lock(transaction_id, self.table.name, "IX")  
+                self.lock_manager.acquire_lock(transaction_id, primary_key, 'X')
+        except Exception as e:
+            print(f" Failed to acquire lock for update: {e}")
+            return False
+        
         rid_location = self.table.index.locate(self.table.key, primary_key)
         if rid_location is None:
             print("Update Error: Record does not exist")
@@ -250,6 +318,11 @@ class Query:
         self.table.index.update_all_indices(primary_key, new_columns, prev_columns)
         # print("Update Successful\n")
 
+       # Release locks if this is a standalone query
+        if standalone:
+            self.lock_manager.release_lock(transaction_id, self.table.name, "IX")
+            self.lock_manager.release_lock(transaction_id, primary_key, "X")
+
         return True
 
 
@@ -262,8 +335,8 @@ class Query:
     # Returns the summation of the given range upon success
     # Returns False if no record exists in the given range
     """
-    def sum(self, start_range, end_range, aggregate_column_index):
-        return self.sum_version(start_range, end_range, aggregate_column_index, 0)
+    def sum(self, start_range, end_range, aggregate_column_index, transaction_id=None):
+        return self.sum_version(start_range, end_range, aggregate_column_index, 0, transaction_id)
 
     
     """
@@ -275,7 +348,20 @@ class Query:
     # Returns the summation of the given range upon success
     # Returns False if no record exists in the given range
     """
-    def sum_version(self, start_range, end_range, aggregate_column_index, relative_version):
+    def sum_version(self, start_range, end_range, aggregate_column_index, relative_version, transaction_id=None):
+        standalone = False  
+
+        if transaction_id is None:
+            transaction_id = threading.get_ident()
+            standalone = True  # Standalone query, must release locks manually
+            
+        try:
+            self.lock_manager.acquire_lock(transaction_id, self.table.name, "IS")
+        except Exception as e:
+            print(f" Failed to acquire lock for usum version: {e}")
+            return False
+
+        
         # Get all RIDs within the specified range
         records_list = self.table.index.locate_range(start_range, end_range, self.table.key)
         
@@ -283,7 +369,16 @@ class Query:
             return False
 
         sum_total = 0
+        locked_rids = []  # Track locked records for proper release
         for rid in records_list:
+            try:
+                 if not self.lock_manager.has_lock(transaction_id, rid, "S"):  
+                    self.lock_manager.acquire_lock(transaction_id, rid, "S")
+                    locked_rids.append(rid)  # Track successfully locked records
+            except Exception as e:
+                print(f"Failed to acquire lock for sum_version on record {rid}: {e}")
+                return False
+            
             page_range_index, base_page_index, base_page_slot = self.table.get_base_record_location(rid)
 
             # Step 3: Get Base Record Details
@@ -340,6 +435,12 @@ class Query:
             if not found_value:
                 aggregate_value = self.__readAndMarkSlot(page_range_index, NUM_HIDDEN_COLUMNS + aggregate_column_index, base_page_index, base_page_slot)
                 sum_total += aggregate_value
+                
+            # Release locks if this is a standalone query
+            if standalone:
+                self.lock_manager.release_lock(transaction_id, self.table.name, "IS")
+                for rid in locked_rids:
+                    self.lock_manager.release_lock(transaction_id, rid, "S")
 
         return sum_total
 

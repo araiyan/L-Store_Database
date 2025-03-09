@@ -3,6 +3,7 @@ from lstore.page_range import PageRange, MergeRequest
 from time import time
 from lstore.config import *
 from lstore.bufferpool import BufferPool
+from lstore.lock import LockManager
 import json
 import os
 import threading
@@ -36,6 +37,7 @@ class Table:
         self.key = key
         self.db_path = db_path
         self.table_path = os.path.join(db_path, name)
+        self.lock_manager = LockManager()
         self.num_columns = num_columns
         self.total_num_columns = num_columns + NUM_HIDDEN_COLUMNS
 
