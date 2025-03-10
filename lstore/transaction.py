@@ -77,7 +77,9 @@ class Transaction:
             # pass log_entry into query only if insert, update, or delete
             if query.__name__ in ["insert", "update", "delete"]:
                 result = query(*args, log_entry=log_entry)
-            else:
+                if query.__name__ in ["update", "delete"]:
+                    table.index.delete_logged_columns()
+            elif query.__name__ in ["select", "select_version", "sum", "sum_version"]:
                 result = query(*args) 
             
             # If the query has failed the transaction should abort
@@ -111,6 +113,7 @@ class Transaction:
                 # soft delete
                 table.deallocation_base_rid_queue.put(rid)
                 table.index.delete_from_all_indices(primary_key)
+                table.index.delete_logged_columns()
             elif query_type == "delete":
                 # undo delete - insert values into indexes
 
@@ -122,13 +125,15 @@ class Transaction:
 
                 # insert record and restore indexes
                 table.insert_record(record)
-                table.index.insert_in_all_indices(record.columns)
+                table.index.clear_logged_columns()
+                #table.index.insert_in_all_indices(record.columns)
             elif query_type == "update":
                 # undo update - restore previous column values
 
                 prev_columns = changes["prev_columns"]
-
-                table.index.update_all_indices(prev_columns[table.key], prev_columns, prev_columns)
+                table.index.delete_from_all_indices(prev_columns[table.key], prev_columns)
+                table.index.delete_logged_columns()
+                #table.index.update_all_indices(prev_columns[table.key], prev_columns, prev_columns)
         
         transaction_id = id(self)
         if self.queries and self.queries[0][1].lock_manager.transaction_states.get(transaction_id):
@@ -143,7 +148,6 @@ class Transaction:
 
         # release_all_locks called on one table since lock_manager is shared globally
         self.queries[0][1].lock_manager.release_all_locks(transaction_id)
-
         self.log.clear()
         return True
 

@@ -17,10 +17,9 @@ class Index:
         self.key = table.key
         self.table = table
 
-        has_stored_index  = self.__generate_primary_index()
+        self.indices[self.key] = OOBTree()
 
-        if not has_stored_index:
-            self.create_index(self.key)
+        self.prev_values_log = {}
 
         self.index_lock = threading.Lock()
 
@@ -208,10 +207,9 @@ class Index:
 
                 if (self.indices[i] != None) and (prev_columns[i] != None):
 
-                    del self.indices[i][prev_columns[i]][rid]
-
-                    if self.indices[i][prev_columns[i]] == {}:
-                        del self.indices[i][prev_columns[i]]
+                    if rid not in self.prev_values_log:
+                        self.prev_values_log[rid] = []
+                        self.prev_values_log[rid].append((i, prev_columns[i]))
 
             return True
     
@@ -224,13 +222,18 @@ class Index:
             if not self.indices[self.key].get(primary_key):
                 return False
             
+            rid = list(self.indices[self.key][primary_key].keys())[0]
+
+            for i in range(self.num_columns):
+                if prev_columns[i] != None:
+                    if rid not in self.prev_values_log:
+                        self.prev_values_log[rid] = []
+                        self.prev_values_log[rid].append((i, prev_columns[i]))
+
             #update primary key first if needed
             if (new_columns[NUM_HIDDEN_COLUMNS + self.key] != None) and  (self.indices[self.key] != None) and (prev_columns[self.key] != None):
 
-                rid = list(self.indices[self.key][primary_key].keys())[0]
-
                 self.insert_to_index(self.key, new_columns[self.key + NUM_HIDDEN_COLUMNS], rid)
-                del self.indices[self.key][primary_key]
                             
                 primary_key = new_columns[self.key + NUM_HIDDEN_COLUMNS]
             
@@ -238,23 +241,22 @@ class Index:
             for i in range(0, self.num_columns):
                 if (new_columns[NUM_HIDDEN_COLUMNS + i] != None) and (self.indices[i] != None) and (prev_columns[i] != None) and (i != self.key):
                 
-                    key = prev_columns[i]
-                    rid = list(self.indices[self.key][primary_key].keys())[0]
-
-                    #if changed value is in key column, transfer to new mapping to new key and delete old key
-                    if self.indices[i].get(new_columns[i + NUM_HIDDEN_COLUMNS]):
-                        self.insert_to_index(i, new_columns[i + NUM_HIDDEN_COLUMNS], rid)
-                        del self.indices[i][key][rid]
-
-                    else:
-                        self.insert_to_index(i, new_columns[i + NUM_HIDDEN_COLUMNS], rid)
-                        del self.indices[i][key][rid]
-                        if self.indices[i][key] == {}:
-                    
-                            del self.indices[i][key]
+                    self.insert_to_index(i, new_columns[i + NUM_HIDDEN_COLUMNS], rid)
 
             return True
     
+
+    def delete_logged_columns(self):
+        with self.index_lock:
+            for rid, columns in self.prev_values_log.items():
+                for items in columns:
+                    if rid in self.indices[items[0]][items[1]]:
+                        del self.indices[items[0]][items[1]][rid]
+            self.prev_values_log = {}
+    
+    def clear_logged_columns(self):
+        self.prev_values_log = {}
+
 
     """
     # get all rid from primary index for merge
