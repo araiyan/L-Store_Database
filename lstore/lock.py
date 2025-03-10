@@ -123,8 +123,7 @@ class LockManager:
                         self.release_all_locks(transaction_id)
                         raise Exception(f"Deadlock detected grabbing exclusive lock - Transaction {transaction_id} is waiting for {other_transaction}")
                 self.lock_table[record_id]['X'].add(transaction_id)
-                self.condition.notify_all()
-                return True 
+ 
             elif lock_type == 'S':
                 # print("Acquiring exclusive lock", transaction_id, record_id)
                 # Wait until no other transaction holds an exclusive lock on the record
@@ -136,24 +135,21 @@ class LockManager:
                         self.release_all_locks(transaction_id)
                         raise Exception(f"Deadlock detected grabbing shared lock - Transaction {transaction_id} is waiting for {other_transaction}")
                 self.lock_table[record_id]['S'].add(transaction_id)
-                self.condition.notify_all()
-                return True 
+                
             elif lock_type == 'IS':
                 # Wait until no other transaction holds an exclusive lock on the record
                 while self.lock_table[record_id]['X']:
                     self.wait_for_graph.add_edge(transaction_id, record_id)
                     self.condition.wait()
                 self.lock_table[record_id]['IS'].count_up()
-                self.condition.notify_all()
-                return True 
+                
             elif lock_type == 'IX':
                 # Wait until no other transaction holds an exclusive lock on the record
                 while self.lock_table[record_id]['X']:
                     self.wait_for_graph.add_edge(transaction_id, record_id)
                     self.condition.wait()
                 self.lock_table[record_id]['IX'].count_up()
-                self.condition.notify_all()
-                return True 
+          
             else:
                 raise ValueError("Invalid lock type")
 
