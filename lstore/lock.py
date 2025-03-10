@@ -209,6 +209,7 @@ class LockManager:
                     
                 self.lock_table[record_id]['IX'].count_down()
                 self.lock_table[record_id]['X'].add(transaction_id)
+
             elif current_lock_type == 'IS' and new_lock_type == 'S':
                 # Wait until no other transaction holds an exclusive lock
                 while self.lock_table[record_id]['X']:
@@ -219,6 +220,20 @@ class LockManager:
                 
                 self.lock_table[record_id]['IS'].count_down()
                 self.lock_table[record_id]['S'].add(transaction_id)
+
+            elif current_lock_type == 'IS' and new_lock_type == 'IX':
+                # Wait until no other transaction holds a conflicting lock
+                while self.lock_table[record_id]['X'] or self.lock_table[record_id]['IS'].count > 1:
+                    other_transaction = next(iter(self.lock_table[record_id]['X']))
+                    if self.wait_for_graph.add_edge(transaction_id, other_transaction):
+                        self.condition.wait()
+                    else:
+                        self.release_all_locks(transaction_id)
+                        raise Exception(f"Deadlock detected grabbing intention to write lock - Transaction {transaction_id} is waiting for {other_transaction}")
+                
+                self.lock_table[record_id]['IS'].count_down()
+                self.lock_table[record_id]['IX'].count_up()
+            
             elif current_lock_type == 'S' and new_lock_type == 'X':
                 # Wait until no other transaction holds a conflicting lock
                 while self.lock_table[record_id]['X'] or self.lock_table[record_id]['IS'].count > 0:
@@ -235,6 +250,6 @@ class LockManager:
                 self.lock_table[record_id]['S'].remove(transaction_id)
                 self.lock_table[record_id]['X'].add(transaction_id)
             else:
-                raise ValueError("Invalid lock upgrade")
+                raise ValueError("Invalid lock upgrade", current_lock_type, new_lock_type)
             self.condition.notify_all()
 

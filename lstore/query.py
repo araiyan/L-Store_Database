@@ -1,3 +1,4 @@
+import threading
 from lstore.table import Table, Record
 from lstore.config import *
 
@@ -130,7 +131,7 @@ class Query:
     # Assume that select will never be called on a key that doesn't exist
     """
     def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
-
+        rid_list = None
         if not self.table.index.exist_index(search_key_index):
 
             self.table.index.create_index(search_key_index)
