@@ -31,6 +31,7 @@ for i in range(0, number_of_records):
     key = 92106429 + i
     keys.append(key)
     records[key] = [key, randint(i * 20, (i + 1) * 20), randint(i * 20, (i + 1) * 20), randint(i * 20, (i + 1) * 20), randint(i * 20, (i + 1) * 20)]
+    # print(records[key])
 
 transaction_workers = []
 transactions = []
@@ -87,10 +88,9 @@ for key in keys:
         if correct != result:
             print('select error on primary key', key, ':', result, ', correct:', correct)
             score -= 1
-            exit(1)
     except:
-        exit(1)
         print('Record Not found', key)
         score -= 1
+print('Score', score, '/', len(keys))
 
 db.close()
