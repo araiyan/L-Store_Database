@@ -98,7 +98,6 @@ class Table:
         return (page_range_index, page_index, page_slot)
 
     def insert_record(self, record: Record):
-
         page_range_index, page_index, page_slot = self.get_base_record_location(record.rid)
 
         if (page_range_index >= len(self.page_ranges)):
@@ -113,7 +112,6 @@ class Table:
         current_page_range.write_base_record(page_index, page_slot, record.columns)
 
     def update_record(self, rid, columns) -> bool:
-
         '''Updates a record given its RID'''
         page_range_index = rid // MAX_RECORD_PER_PAGE_RANGE
         current_page_range:PageRange = self.page_ranges[page_range_index]

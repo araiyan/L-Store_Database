@@ -16,8 +16,6 @@ class Database():
         self.no_path_set = True
         self.lock_manager = LockManager()
         atexit.register(self.__remove_db_path)
-
-        self.db_lock = threading.Lock()
         
 
     def open(self, path):
@@ -80,38 +78,30 @@ class Database():
     :param key: int             #Index of table key in columns
     """
     def create_table(self, name, num_columns, key_index):
+        if self.tables.get(name) is not None:
+            raise NameError(f"Error creating Table! Following table already exists: {name}")
 
-        with self.db_lock:
-            if self.tables.get(name) is not None:
-                raise NameError(f"Error creating Table! Following table already exists: {name}")
+        self.tables[name] = Table(name, num_columns, key_index, self.path, self.lock_manager)
 
-            self.tables[name] = Table(name, num_columns, key_index, self.path, self.lock_manager)
-
-            return self.tables[name]
-
+        return self.tables[name]
     
     """
     # Deletes the specified table
     """
     def drop_table(self, name):
+        if self.tables.get(name) is None:
+            raise NameError(f"Error dropping Table! Following table does not exist: {name}")
+        
+        del self.tables[name]
 
-        with self.db_lock:
-            if self.tables.get(name) is None:
-                raise NameError(f"Error dropping Table! Following table does not exist: {name}")
-            
-            del self.tables[name]
-
-    
     """
     # Returns table with the passed name
     """
     def get_table(self, name):
-
-        with self.db_lock:
-            if self.tables.get(name) is None:
-                raise NameError(f"Error getting Table! Following table does not exist: {name}")
-            
-            return self.tables[name]
+        if self.tables.get(name) is None:
+            raise NameError(f"Error getting Table! Following table does not exist: {name}")
+        
+        return self.tables[name]
         
     def __remove_db_path(self):
         if os.path.exists(self.path):
