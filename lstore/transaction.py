@@ -44,7 +44,8 @@ class Transaction:
                     try:
                         table.lock_manager.acquire_lock(transaction_id, record_identifier, "S")
                         table.lock_manager.acquire_lock(transaction_id, table.name, "IS")
-                    except Exception:
+                    except Exception as e:
+                        print("Failed to aquire shared lock: ", e)
                         return self.abort()
                     
                 else:
@@ -53,7 +54,8 @@ class Transaction:
                     try:
                         table.lock_manager.acquire_lock(transaction_id, record_identifier, "X")
                         table.lock_manager.acquire_lock(transaction_id, table.name, "IX")
-                    except Exception:
+                    except Exception as e:
+                        print("Failed to aquire exclusive lock: ", e)
                         return self.abort()
                     
             elif (locked_records[record_identifier] == "S" and query.__name__ in ["update", "delete", "insert"]):
@@ -62,7 +64,8 @@ class Transaction:
                 try:
                     table.lock_manager.upgrade_lock(transaction_id, record_identifier, "S", "X")
                     table.lock_manager.upgrade_lock(transaction_id, table.name, "IS", "IX")
-                except Exception:
+                except Exception as e:
+                    print("Failed to upgrade lock: ", e)
                     return self.abort()
 
         # exectue queries and handle logging
@@ -89,6 +92,7 @@ class Transaction:
     
     def abort(self):
         '''Rolls back the transaction and releases all locks'''
+        print("Aborting transaction")
 
         # reverse logs to process latest first
         for entry in reversed(self.log):
