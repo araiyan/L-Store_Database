@@ -1,4 +1,3 @@
-import pickle
 from datetime import datetime
 
 class TransactionLog:
@@ -21,21 +20,12 @@ class TransactionLog:
         
         self.transactions[transaction_id].append(log_entry)
 
-        # Save logs in binary format
-        #with open(self.log_file, "wb") as log:
-            #pickle.dump(self.transactions, log)
 
     def get_transaction_log(self, transaction_id):
-        #try:
-            #with open(self.log_file, "rb") as log:
-                #self.transactions = pickle.load(log)
-        #except FileNotFoundError:
-            #self.transactions = {}
         
         return self.transactions.get(transaction_id, [])
 
     def remove_transaction(self, transaction_id):
         if transaction_id in self.transactions:
             del self.transactions[transaction_id]
-            #with open(self.log_file, "wb") as log:
-                #pickle.dump(self.transactions, log)
+ 
