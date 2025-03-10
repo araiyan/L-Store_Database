@@ -59,6 +59,4 @@ class TransactionWorker:
                 self.stats.append(False)
                 self.transaction_errors[transaction_id] = str(e)
 
-            self.stats.append(result)
-
         self.result = len(list(filter(lambda x: x, self.stats)))

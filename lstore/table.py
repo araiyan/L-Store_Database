@@ -41,6 +41,9 @@ class Table:
         self.total_num_columns = num_columns + NUM_HIDDEN_COLUMNS
         self.lock_manager:LockManager = lock_manager
 
+        self.lock_manager:LockManager = lock_manager
+        self.table_lock = threading.RLock()  # Reentrant lock for table-level operations 
+
         self.page_directory = {}
         '''
         Page direcotry will map rids to consolidated rids
@@ -98,13 +101,15 @@ class Table:
         page_range_index, page_index, page_slot = self.get_base_record_location(record.rid)
 
         if (page_range_index >= len(self.page_ranges)):
-            self.page_ranges.append(PageRange(page_range_index, self.num_columns, self.bufferpool))
+            with self.table_lock:
+                if page_range_index >= len(self.page_ranges):
+                    self.page_ranges.append(PageRange(page_range_index, self.num_columns, self.bufferpool))
         
         current_page_range:PageRange = self.page_ranges[page_range_index]
 
         with current_page_range.page_range_lock:
             record.columns[TIMESTAMP_COLUMN] = current_page_range.tps
-        current_page_range.write_base_record(page_index, page_slot, record.columns)   
+        current_page_range.write_base_record(page_index, page_slot, record.columns)
 
     def update_record(self, rid, columns) -> bool:
         '''Updates a record given its RID'''
@@ -123,7 +128,7 @@ class Table:
             #     self.merge_thread.start()
 
         return update_success
-
+    
     
     def __merge(self):
         # print("Merge is happening")

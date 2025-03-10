@@ -3,6 +3,7 @@ import json
 from lstore.table import Table
 from lstore.index import Index
 from lstore.lock import LockManager
+import threading
 from BTrees.OOBTree import OOBTree
 import atexit
 import shutil
@@ -81,8 +82,8 @@ class Database():
             raise NameError(f"Error creating Table! Following table already exists: {name}")
 
         self.tables[name] = Table(name, num_columns, key_index, self.path, self.lock_manager)
-        return self.tables[name]
 
+        return self.tables[name]
     
     """
     # Deletes the specified table
@@ -93,7 +94,6 @@ class Database():
         
         del self.tables[name]
 
-    
     """
     # Returns table with the passed name
     """
@@ -102,7 +102,7 @@ class Database():
             raise NameError(f"Error getting Table! Following table does not exist: {name}")
         
         return self.tables[name]
-    
+        
     def __remove_db_path(self):
         if os.path.exists(self.path):
             shutil.rmtree(self.path)
