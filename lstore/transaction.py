@@ -38,17 +38,28 @@ class Transaction:
         locked_records_rid = set()
         locked_records_pk = set()
         locked_tables = set()
+        locked_DB = set()
 
 
         for query, table, args in self.queries:
 
             # set table and record lock types
             if query.__name__ in ["select", "select_version", "sum", "sum_version"]:
+                db_lock_type = "IS"
                 table_lock_type = "IS"
                 record_lock_type = "S"
             else: # update, delete, insert
+                db_lock_type = "IX"
                 table_lock_type = "IX"
                 record_lock_type = "X"
+
+            if 'DB' not in locked_DB:
+                try:
+                    table.lock_manager.acquire_lock(transaction_id, 'DB', db_lock_type)
+                    locked_DB.add('DB')
+
+                except Exception:
+                    return self.abort()
 
             # acquire lock on table if not present
             if table.name not in locked_tables:
@@ -162,4 +173,3 @@ class Transaction:
 
         self.log.clear()
         return True
-

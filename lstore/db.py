@@ -81,18 +81,12 @@ class Database():
     """
     def create_table(self, name, num_columns, key_index, tid = None):
 
-        if tid:
-            self.lock_manager.acquire_lock(tid, 'DB', 'IX')
-            
         with self.db_lock:
             if self.tables.get(name) is not None:
                 raise NameError(f"Error creating Table! Following table already exists: {name}")
 
             self.tables[name] = Table(name, num_columns, key_index, self.path, self.lock_manager)
-            
-            if tid:
-                self.lock_manager.acquire_lock(tid, name, 'X')
-                
+
             return self.tables[name]
 
     
@@ -101,10 +95,6 @@ class Database():
     """
     def drop_table(self, name, tid = None):
 
-        if tid:
-            self.lock_manager.acquire_lock(tid, 'DB', 'IX')
-            self.lock_manager.acquire_lock(tid, name, 'X')
-            
         with self.db_lock:
             if self.tables.get(name) is None:
                 raise NameError(f"Error dropping Table! Following table does not exist: {name}")
@@ -117,12 +107,6 @@ class Database():
     """
     def get_table(self, name, tid = None, lock_type = 'IS'):
 
-        if tid:
-            self.lock_manager.acquire_lock(tid, 'DB', lock_type)
-            # Acquire appropriate lock on the table based on intention
-            table_lock_type = 'S' if lock_type == 'IS' else 'IX'
-            self.lock_manager.acquire_lock(tid, name, table_lock_type)
-            
         with self.db_lock:
             if self.tables.get(name) is None:
                 raise NameError(f"Error getting Table! Following table does not exist: {name}")
