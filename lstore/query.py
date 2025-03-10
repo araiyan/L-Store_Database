@@ -30,26 +30,12 @@ class Query:
     """
 
     # Delete was simplified to just locate rid and put it on the queue, then deleting indices. Actual process will occur in merge function
-    def delete(self, primary_key, transaction_id=None):
+    def delete(self, primary_key):
         """
         Marks a record for deletion but does not remove it immediately.
         Actual deletion occurs during the merge process.
         Returns True upon successful deletion, False if record does not exist.
-        """
-        """ Deletes a record with proper hierarchical locking. """
-        standalone = False 
-        if transaction_id is None:
-            transaction_id = threading.get_ident()  # Fallback for standalone queries
-            standalone = True  # Flag to track standalone queries
-
-        try:
-            if not self.lock_manager.has_lock(transaction_id, primary_key, "X"):  # Prevent self-deadlock
-                self.lock_manager.acquire_lock(transaction_id, self.table.name, "IX")  
-                self.lock_manager.acquire_lock(transaction_id, primary_key, 'X')
-        except Exception as e:
-            print(f" Failed to acquire lock for delete: {e}")
-            return False
-        
+        """       
         base_rid = self.table.index.locate(self.table.key, primary_key)
         if(base_rid is None):
             return False  # Record does not exist
@@ -62,12 +48,7 @@ class Query:
         self.table.deallocation_base_rid_queue.put(base_rid[0])
 
         self.table.index.delete_from_all_indices(primary_key, prev_columns)
-        
-         # Release locks if this is a standalone query
-        if standalone:
-            self.lock_manager.release_lock(transaction_id, self.table.name, "IX")
-            self.lock_manager.release_lock(transaction_id, primary_key, "X")
-            
+             
         return True
 
     """
