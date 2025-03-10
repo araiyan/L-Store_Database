@@ -239,7 +239,7 @@ class Index:
                 if (new_columns[NUM_HIDDEN_COLUMNS + i] != None) and (self.indices[i] != None) and (prev_columns[i] != None) and (i != self.key):
                 
                         key = prev_columns[i]
-                        rid = list(self.indices[self.key][new_columns[self.key + NUM_HIDDEN_COLUMNS]].keys())[0]
+                        rid = list(self.indices[self.key][primary_key].keys())[0]
 
                         #if changed value is in key column, transfer to new mapping to new key and delete old key
                         if self.indices[i].get(new_columns[i + NUM_HIDDEN_COLUMNS]):
