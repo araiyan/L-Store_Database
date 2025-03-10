@@ -65,9 +65,12 @@ class Transaction:
                 # Acquire necessary locks
                 if key is not None:
                     print(f"Transaction {self.transaction_id} trying to acquire lock on {key}...")
-                    if not self.lock_manager.acquire_lock(self.transaction_id, key, record_lock_type):  
-                        print(f"Transaction {self.transaction_id} failed to acquire lock on {key}, aborting.")
-                        return self.abort()
+                    self.lock_manager.acquire_lock(self.transaction_id, key, record_lock_type)
+    
+                    #if not lock_acquired:
+                        #print(f"Transaction {self.transaction_id} failed to acquire lock on {key}, aborting.")
+                        #return self.abort()  # Abort transaction if lock not acquired
+
                     print(f"Transaction {self.transaction_id} acquired lock on {key}.")
                     self.acquired_locks.append(key)
                                     
