@@ -19,7 +19,6 @@ class Transaction:
         self.transaction_id = id(self)
         self.rollback_data = {}
         self.acquired_locks = []
-        self.lock_manager = LockManager()  
         self.log_manager = TransactionLog()
         self.thread_data = threading.local()  #Store transaction state in thread-local storage
 
