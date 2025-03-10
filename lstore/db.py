@@ -79,7 +79,7 @@ class Database():
     :param num_columns: int     #Number of Columns: all columns are integer
     :param key: int             #Index of table key in columns
     """
-    def create_table(self, name, num_columns, key_index, tid = None):
+    def create_table(self, name, num_columns, key_index):
 
         with self.db_lock:
             if self.tables.get(name) is not None:
@@ -93,7 +93,7 @@ class Database():
     """
     # Deletes the specified table
     """
-    def drop_table(self, name, tid = None):
+    def drop_table(self, name):
 
         with self.db_lock:
             if self.tables.get(name) is None:
@@ -105,7 +105,7 @@ class Database():
     """
     # Returns table with the passed name
     """
-    def get_table(self, name, tid = None, lock_type = 'IS'):
+    def get_table(self, name):
 
         with self.db_lock:
             if self.tables.get(name) is None:
