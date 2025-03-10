@@ -77,8 +77,7 @@ class Transaction:
             # pass log_entry into query only if insert, update, or delete
             if query.__name__ in ["insert", "update", "delete"]:
                 result = query(*args, log_entry=log_entry)
-                if query.__name__ in ["update", "delete"]:
-                    table.index.delete_logged_columns()
+
             elif query.__name__ in ["select", "select_version", "sum", "sum_version"]:
                 result = query(*args) 
             

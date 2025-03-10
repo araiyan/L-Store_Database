@@ -19,8 +19,6 @@ class Index:
 
         self.indices[self.key] = OOBTree()
 
-        self.prev_values_log = {}
-
         self.index_lock = threading.Lock()
 
     """
@@ -177,20 +175,21 @@ class Index:
     # Takes a record and insert it into value_mapper, primary and secondary index
     """
     def insert_in_all_indices(self, columns):
-        
-        primary_key = columns[self.key + NUM_HIDDEN_COLUMNS]
-        if self.indices[self.key].get(primary_key):
-            return False
+        with self.index_lock:
+            primary_key = columns[self.key + NUM_HIDDEN_COLUMNS]
+            if self.indices[self.key].get(primary_key):
+                return False
 
-        #if we have secondary index, insert column value into secondary index
-        for i in range(self.num_columns):
+            #if we have secondary index, insert column value into secondary index
+            for i in range(self.num_columns):
 
-            if self.indices[i] != None:
-                column_value = columns[i + NUM_HIDDEN_COLUMNS]
-                rid = columns[RID_COLUMN]
-                self.insert_to_index(i,column_value, rid)
+                if self.indices[i] != None:
+                    column_value = columns[i + NUM_HIDDEN_COLUMNS]
+                    rid = columns[RID_COLUMN]
 
-        return True
+                    self.insert_to_index(i, column_value, rid)
+
+            return True
 
     """
     # Remove element associated with primary key from value_mapper, primary and secondary index
@@ -207,9 +206,11 @@ class Index:
 
                 if (self.indices[i] != None) and (prev_columns[i] != None):
 
-                    if rid not in self.prev_values_log:
-                        self.prev_values_log[rid] = []
-                        self.prev_values_log[rid].append((i, prev_columns[i]))
+                    if self.indices[i].get(prev_columns[i]) and self.indices[i][prev_columns[i]].get(rid, []):
+                        del self.indices[i][prev_columns[i]][rid]
+
+                        if self.indices[i][prev_columns[i]] == {}:
+                            del self.indices[i][prev_columns[i]]
 
             return True
     
@@ -224,39 +225,33 @@ class Index:
             
             rid = list(self.indices[self.key][primary_key].keys())[0]
 
-            for i in range(self.num_columns):
-                if prev_columns[i] != None:
-                    if rid not in self.prev_values_log:
-                        self.prev_values_log[rid] = []
-                        self.prev_values_log[rid].append((i, prev_columns[i]))
-
             #update primary key first if needed
             if (new_columns[NUM_HIDDEN_COLUMNS + self.key] != None) and  (self.indices[self.key] != None) and (prev_columns[self.key] != None):
 
-                self.insert_to_index(self.key, new_columns[self.key + NUM_HIDDEN_COLUMNS], rid)
-                            
+                if self.indices[self.key].get(primary_key) and self.indices[self.key][primary_key].get(rid, []):
+                    del self.indices[self.key][primary_key][rid]
+
+                    if self.indices[self.key][primary_key] == {}:
+                        del self.indices[self.key][primary_key]
+                    self.insert_to_index(self.key, new_columns[self.key + NUM_HIDDEN_COLUMNS], rid)
+                        
                 primary_key = new_columns[self.key + NUM_HIDDEN_COLUMNS]
             
             #update other indices
             for i in range(0, self.num_columns):
                 if (new_columns[NUM_HIDDEN_COLUMNS + i] != None) and (self.indices[i] != None) and (prev_columns[i] != None) and (i != self.key):
-                
-                    self.insert_to_index(i, new_columns[i + NUM_HIDDEN_COLUMNS], rid)
+                    key = prev_columns[i]
+
+                    if self.indices[i].get(key) and self.indices[i][key].get(rid, []):
+                        del self.indices[i][key][rid]
+
+                        if self.indices[i][key] == {}:
+                            del self.indices[i][key]
+
+                        self.insert_to_index(i, new_columns[i + NUM_HIDDEN_COLUMNS], rid)
 
             return True
     
-
-    def delete_logged_columns(self):
-        with self.index_lock:
-            for rid, columns in self.prev_values_log.items():
-                for items in columns:
-                    if rid in self.indices[items[0]][items[1]]:
-                        del self.indices[items[0]][items[1]][rid]
-            self.prev_values_log = {}
-    
-    def clear_logged_columns(self):
-        self.prev_values_log = {}
-
 
     """
     # get all rid from primary index for merge
@@ -268,30 +263,6 @@ class Index:
                 all_rid.append(rid)
         return all_rid
         
-    # use this when open db
-    def __generate_primary_index(self):
-
-        #get base rid for every record with no duplicates
-        all_base_rids = self.table.grab_all_base_rids()
-        if not all_base_rids:
-            return False
-        
-        self.indices[self.key] = OOBTree()
-        frames_used = []
-        
-        #read through bufferpool to get primary index
-        for rid in all_base_rids:
-            page_range_index, page_index, page_slot = self.table.get_base_record_location(rid)
-            primary_key = self.table.bufferpool.read_page_slot(page_range_index, self.key + NUM_HIDDEN_COLUMNS, page_index, page_slot)
-            frame_num  = self.table.bufferpool.get_page_frame_num(page_range_index, self.key + NUM_HIDDEN_COLUMNS, page_index)
-            frames_used.append(frame_num)
-            #insert {primary_index: {rid: True}} into primary index BTree
-            self.insert_to_index(self.key, primary_key, rid)
-        
-        for frame in frames_used:
-            self.table.bufferpool.mark_frame_used(frame)
-
-        return True
     
     # call "index:": self.index.serialize() from table
     # pickle every index BTree and then store them in base64
