@@ -31,7 +31,6 @@ for i in range(0, number_of_records):
     key = 92106429 + i
     keys.append(key)
     records[key] = [key, randint(i * 20, (i + 1) * 20), randint(i * 20, (i + 1) * 20), randint(i * 20, (i + 1) * 20), randint(i * 20, (i + 1) * 20)]
-    # print(records[key])
 
 transaction_workers = []
 transactions = []
@@ -60,7 +59,6 @@ for j in range(number_of_operations_per_record):
             records[key][i] = value
             transactions[key % number_of_transactions].add_query(query.select, grades_table, key, 0, [1, 1, 1, 1, 1])
             transactions[key % number_of_transactions].add_query(query.update, grades_table, key, *updated_columns)
-#print(dict(grades_table.index.indices[3]))
 print("Update finished")
 
 
@@ -78,8 +76,6 @@ for i in range(num_threads):
 for i in range(num_threads):
     transaction_workers[i].join()
 
-print(f"index 3 :{dict(grades_table.index.indices[3])}")
-print(f"entries in index 3 :{len(dict(grades_table.index.indices[3]))}")
 
 score = len(keys)
 for key in keys:
@@ -91,15 +87,10 @@ for key in keys:
         if correct != result:
             print('select error on primary key', key, ':', result, ', correct:', correct)
             score -= 1
-            #print(dict(grades_table.index.indices[3]))
-            print(f"entries in index 3 :{len(dict(grades_table.index.indices[3]))}")
             exit(1)
     except:
         exit(1)
         print('Record Not found', key)
         score -= 1
-#print(dict(grades_table.index.indices[3]))
-print(f"entries in index 3 :{len(dict(grades_table.index.indices[3]))}")
-print('Score', score, '/', len(keys))
 
 db.close()
