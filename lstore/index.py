@@ -238,20 +238,20 @@ class Index:
             for i in range(0, self.num_columns):
                 if (new_columns[NUM_HIDDEN_COLUMNS + i] != None) and (self.indices[i] != None) and (prev_columns[i] != None) and (i != self.key):
                 
-                        key = prev_columns[i]
-                        rid = list(self.indices[self.key][primary_key].keys())[0]
+                    key = prev_columns[i]
+                    rid = list(self.indices[self.key][primary_key].keys())[0]
 
-                        #if changed value is in key column, transfer to new mapping to new key and delete old key
-                        if self.indices[i].get(new_columns[i + NUM_HIDDEN_COLUMNS]):
-                            self.insert_to_index(i, new_columns[i + NUM_HIDDEN_COLUMNS], rid)
-                            del self.indices[i][key][rid]
+                    #if changed value is in key column, transfer to new mapping to new key and delete old key
+                    if self.indices[i].get(new_columns[i + NUM_HIDDEN_COLUMNS]):
+                        self.insert_to_index(i, new_columns[i + NUM_HIDDEN_COLUMNS], rid)
+                        del self.indices[i][key][rid]
 
-                        else:
-                            self.insert_to_index(i, new_columns[i + NUM_HIDDEN_COLUMNS], rid)
-                            del self.indices[i][key][rid]
-                            if self.indices[i][key] == {}:
-                        
-                                del self.indices[i][key]
+                    else:
+                        self.insert_to_index(i, new_columns[i + NUM_HIDDEN_COLUMNS], rid)
+                        del self.indices[i][key][rid]
+                        if self.indices[i][key] == {}:
+                    
+                            del self.indices[i][key]
 
             return True
     

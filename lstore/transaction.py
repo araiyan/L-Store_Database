@@ -29,61 +29,41 @@ class Transaction:
     # If you choose to implement this differently this method must still return True if transaction commits or False on abort
     def run(self):
         '''Acquires intention/record locks and handles logging'''
-
-        if not self.queries:
-            return False
-        
-        # get transaction id, unique for every Transaction object
         transaction_id = id(self)
-        locked_records_rid = set()
-        locked_records_pk = set()
-        locked_tables = set()
-
+        locked_records = {}
+        locked_tables = {}
 
         for query, table, args in self.queries:
-
             # set table and record lock types
-            if query.__name__ in ["select", "select_version", "sum", "sum_version"]:
-                table_lock_type = "IS"
-                record_lock_type = "S"
-            else: # update, delete, insert
-                table_lock_type = "IX"
-                record_lock_type = "X"
+            record_identifier = self.__query_unique_identifier(query, table, args)
 
-            # acquire lock on table if not present
-            if table.name not in locked_tables:
-                try: 
-                    table.lock_manager.acquire_lock(transaction_id, table.name, table_lock_type)
-                    locked_tables.add(table.name)
-                except Exception:
-                    # raise ValueError(f"Transaction {transaction_id} failed to acquire lock: {e}")
-                    return self.abort()
-            
-            # handle record level locks; for select-adjacent queries, locks search through indexes
-            if query.__name__ in ["select", "select_version", "sum", "sum_version"]:
-                rids = table.index.locate(table.key, args[0])
-                if rids is None:
-                    continue
-                
-                for rid in rids:
-                    if rid not in locked_records_rid:
-                        try:
-                            table.lock_manager.acquire_lock(transaction_id, rid, record_lock_type)
-                            locked_records_rid.add(rid)
-                        except Exception:
-                            return self.abort()
-                        
-            # otherwise lock based on primary key (update, insert, delete)
-            else:
-                primary_key = args[0]
-
-                if primary_key not in locked_records_pk:
+            if record_identifier not in locked_records:
+                if (query.__name__ in ["select", "select_version", "sum", "sum_version"]):
+                    locked_records[record_identifier] = "S"
+                    locked_tables[record_identifier] = "IS"
                     try:
-                        table.lock_manager.acquire_lock(transaction_id, primary_key, record_lock_type)
-                        locked_records_pk.add(primary_key)
+                        table.lock_manager.acquire_lock(transaction_id, record_identifier, "S")
+                        table.lock_manager.acquire_lock(transaction_id, table.name, "IS")
                     except Exception:
                         return self.abort()
-
+                    
+                else:
+                    locked_records[record_identifier] = "X"
+                    locked_tables[record_identifier] = "IX"
+                    try:
+                        table.lock_manager.acquire_lock(transaction_id, record_identifier, "X")
+                        table.lock_manager.acquire_lock(transaction_id, table.name, "IX")
+                    except Exception:
+                        return self.abort()
+                    
+            elif (locked_records[record_identifier] == "S" and query.__name__ in ["update", "delete", "insert"]):
+                locked_records[record_identifier] = "X"
+                locked_tables[record_identifier] = "IX"
+                try:
+                    table.lock_manager.upgrade_lock(transaction_id, record_identifier, "S", "X")
+                    table.lock_manager.upgrade_lock(transaction_id, table.name, "IS", "IX")
+                except Exception:
+                    return self.abort()
 
         # exectue queries and handle logging
         for query, table, args in self.queries:
@@ -163,3 +143,14 @@ class Transaction:
         self.log.clear()
         return True
 
+    def __query_unique_identifier(self, query, table, args):
+        if (query.__name__ in ["delete", "update"]):
+            return (args[0], table.key)
+        elif (query.__name__ == "insert"):
+            return (args[table.key], table.key)
+        elif (query.__name__ in ["select", "select_version"]):
+            return (args[0], args[1])
+        elif (query.__name__ in ["sum", "sum_version"]):
+            return args[3]
+        else:
+            raise ValueError(f"Query {query.__name__} not supported")

@@ -45,7 +45,6 @@ class TransactionWorker:
         transactions_to_run = list(self.transactions) if len(self.transactions) > 0 else []
         
         for transaction in transactions_to_run:
-            transaction_id = id(transaction)
             result = None
             
             result = transaction.run()
