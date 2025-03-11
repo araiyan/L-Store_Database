@@ -30,25 +30,40 @@ class Query:
     """
 
     # Delete was simplified to just locate rid and put it on the queue, then deleting indices. Actual process will occur in merge function
-    def delete(self, primary_key):
+    def delete(self, primary_key, log_entry=None):
         """
         Marks a record for deletion but does not remove it immediately.
         Actual deletion occurs during the merge process.
         Returns True upon successful deletion, False if record does not exist.
         """       
+        # Locate the RID associated with the primary key
         base_rid = self.table.index.locate(self.table.key, primary_key)
         if(base_rid is None):
             return False  # Record does not exist
         
-        #record = self.select(primary_key, self.table.key, [1] * self.table.num_columns)
-        #if not record:
-            #return False
         prev_columns = self.__get_prev_columns(base_rid[0], *self.table.index.indices)
+
+        # log deletion before it is removed
+        if log_entry:
+            index_changes = []
+            for col_index, index in enumerate(self.table.index.indices):
+                if index:
+
+                    # for tuple: column, old_value, new_value (None)
+                    index_changes.append((col_index, prev_columns[col_index], None))
+
+            log_entry["changes"].append({
+                "type": "delete",
+                "rid": base_rid[0],
+                "table": self.table.name,
+                "prev_columns": prev_columns,
+                "page_range": base_rid[0] // MAX_RECORD_PER_PAGE_RANGE,
+                "index_changes": index_changes
+            })
 
         self.table.deallocation_base_rid_queue.put(base_rid[0])
 
         self.table.index.delete_from_all_indices(primary_key, prev_columns)
-             
         return True
 
     """
@@ -56,7 +71,7 @@ class Query:
     # Return True upon succesful insertion
     # Returns False if insert fails for whatever reason
     """
-    def insert(self, *columns, transaction_id=None):
+    def insert(self, *columns, transaction_id=None, log_entry=None):
 
         """ Inserts a new record while ensuring transactional consistency."""
         primary_key = columns[self.table.key]
@@ -94,11 +109,29 @@ class Query:
     
         self.table.insert_record(record)
         self.table.index.insert_in_all_indices(record.columns)
-        
+
+        # log insert
+        if log_entry:
+            index_changes = []
+            for col_index, index in enumerate(self.table.index.indices):
+                if index:
+                    
+                    # for tuple: column, old_value (None), new_value
+                    index_changes.append((col_index, None, columns[col_index]))
+
+            log_entry["changes"].append({
+                "type": "insert",
+                "rid": record.rid,
+                "table": self.table.name,
+                "columns": columns,
+                "page_range": record.rid // MAX_RECORD_PER_PAGE_RANGE,
+                "index_changes": index_changes
+            })
         # Release locks if this is a standalone query
         if standalone:
             self.lock_manager.release_lock(transaction_id, self.table.name, "IX")
             self.lock_manager.release_lock(transaction_id, primary_key, "X")
+
 
         return True
 
@@ -240,7 +273,7 @@ class Query:
     # Returns True if update is succesful
     # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking (Ignore this for now)
     """
-    def update(self, primary_key, *columns, transaction_id=None):
+    def update(self, primary_key, *columns, transaction_id=None, log_entry=None):
         standalone = False 
         if transaction_id is None:
             transaction_id = threading.get_ident()  # Fallback for standalone queries
@@ -310,6 +343,25 @@ class Query:
         if standalone:
             self.lock_manager.release_lock(transaction_id, self.table.name, "IX")
             self.lock_manager.release_lock(transaction_id, primary_key, "X")
+            
+           # log update changes
+        if log_entry:
+            index_changes = []
+            for col_index, index in enumerate(self.table.index.indices):
+                if index and prev_columns[col_index] != columns[col_index]:
+
+                    # for tuple: column, old_value, new_value
+                    index_changes.append((col_index, prev_columns[col_index], columns[col_index]))
+                    
+            log_entry["changes"].append({
+                "type": "update",
+                "rid": rid_location[0],
+                "prev_tail_rid": prev_tail_rid,
+                "table": self.table.name,
+                "prev_columns": prev_columns,
+                "page_range": page_range_index,
+                "index_changes": index_changes
+            })
 
         return True
 
