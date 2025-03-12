@@ -50,6 +50,7 @@ index.py: create/update index refactor    Tracy +132
 lock.py: Lock Manager (2PL and SIX mode)  Raiyan +160
 transaction_worker.py: run worker         Derrick +79
 DB.py: Granularity locks (DB/Table)       Derrick +13
+Table.py: table locks                     Derrick +10 (unused)
 query.py: M2 extended fixes               Tracy +42
 lock.py: Graph Based Deadlock Detection   Raiyan +107
 transactions.py: log and commit/abort     Leo +124
@@ -58,6 +59,7 @@ transaction.py: run and uniqueIdentifier  Raiyan +47
 lock.py: upgrade S to X                   Raiyan +33
 lock.py: upgrade IS to IX                 Raiyan +14
 index.py: concurrent index update         Tracy +50
+query.py: query level granularity locks   Molly +216 (unused)
 
 ## Total Contributions:
 
