@@ -2,17 +2,25 @@ from lstore.table import Table, Record
 from lstore.index import Index
 from lstore.lock import LockManager
 from lstore.config import *
+from lstore.query import Query
+from lstore.transaction_log import TransactionLog
 
 class Transaction:
+    
+    log_manager = TransactionLog()
 
     """
     # Creates a transaction object.
     """
-    def __init__(self):
+    def __init__(self, lock_manager=None):
         self.queries = []
-
+        self.transaction_id = id(self)
         # list of log dictionaries
-        self.log = []
+        # Use a separate log manager for persistent logging.
+        self.log_manager = TransactionLog()
+        # Local undo log for rollback
+        self.undo_log = []
+
 
     """
     # Adds the given query to this transaction
@@ -27,6 +35,13 @@ class Transaction:
 
         
     # If you choose to implement this differently this method must still return True if transaction commits or False on abort
+    """
+     Executes the transaction:
+    - Acquires necessary locks
+    - Executes queries
+    - Rolls back if any query fails
+    - Commits if all succeed
+    """
     def run(self):
         '''Acquires intention/record locks and handles logging'''
         transaction_id = id(self)
@@ -85,8 +100,17 @@ class Transaction:
             if result == False:
                 return self.abort()
             
-            # log successful operations for future potential rollback
-            self.log.append(log_entry)
+            # Record the log entry locally for potential rollback and in the log manager 
+            self.undo_log.append(log_entry)
+            
+            # Record the log entry locally and in the persistent log manager for recovery
+            self.undo_log.append(log_entry)
+            op = log_entry.get("query")
+            rid = log_entry.get("rid")
+            pre_args = log_entry.get("prev_columns")
+            post_args = log_entry.get("columns")
+            self.log_manager.log_operation(transaction_id, op, rid, pre_args, post_args)
+            
 
         return self.commit()
 
@@ -95,7 +119,8 @@ class Transaction:
         '''Rolls back the transaction and releases all locks'''
 
         # reverse logs to process latest first
-        for entry in reversed(self.log):
+        for entry in reversed(self.undo_log):
+
             query_type = entry["query"]
             table = entry["table"]
             args = entry["args"]
@@ -106,32 +131,47 @@ class Transaction:
 
             if query_type == "insert":
                 # undo insert - remove inserted record from storage and indexes
-
-                rid = changes["rid"]
-                # soft delete
-                table.deallocation_base_rid_queue.put(rid)
-                table.index.delete_from_all_indices(primary_key)
-                table.index.delete_logged_columns()
+                try:
+                    # For an insert, rollback by deleting the inserted record.
+                    rid = changes["rid"]
+                    # soft delete
+                    table.deallocation_base_rid_queue.put(rid)
+                    table.index.delete_from_all_indices(primary_key)
+                    table.index.delete_logged_columns()
+                except Exception as e:
+                    print(f"Error rolling back insert for RID {rid}: {e}")
+ 
             elif query_type == "delete":
                 # undo delete - insert values into indexes
 
-                prev_columns = changes["prev_columns"]
-                rid = changes["rid"]
+                try:
+                    # For a delete, rollback by re-inserting the deleted record.                    
+                    prev_columns = changes["prev_columns"]
+                    rid = changes["rid"]
 
-                # create new record object based on logged values
-                record = Record(rid, primary_key, prev_columns)
+                    # create new record object based on logged values
+                    record = Record(rid, primary_key, prev_columns)
 
-                # insert record and restore indexes
-                table.insert_record(record)
-                table.index.clear_logged_columns()
-                #table.index.insert_in_all_indices(record.columns)
+                    # insert record and restore indexes
+                    table.insert_record(record)
+                    #table.index.clear_logged_columns()
+                    table.index.insert_in_all_indices(record.columns)
+                except Exception as e:
+                    print(f"Error rolling back delete for RID {rid}: {e}")
+                
             elif query_type == "update":
                 # undo update - restore previous column values
-
-                prev_columns = changes["prev_columns"]
-                table.index.delete_from_all_indices(prev_columns[table.key], prev_columns)
-                table.index.delete_logged_columns()
-                #table.index.update_all_indices(prev_columns[table.key], prev_columns, prev_columns)
+                try:
+                    # For an update, rollback by restoring the previous state.
+                    prev_columns = changes["prev_columns"]  #new columns now when reversed
+                    upd_columns = changes["columns"]  #prev columns now
+                    table.index.delete_from_all_indices(prev_columns[table.key], prev_columns)
+                    table.index.delete_logged_columns()
+                    #table.index.update_all_indices(prev_columns[table.key], prev_columns, upd_columns)
+                    table.update_record(rid, prev_columns)
+                    table.index.update_all_indices(primary_key, prev_columns,upd_columns)
+                except Exception as e:
+                    print(f"Error rolling back update for RID {rid}: {e}")
         
         transaction_id = id(self)
         if self.queries and self.queries[0][1].lock_manager.transaction_states.get(transaction_id):
@@ -146,7 +186,9 @@ class Transaction:
 
         # release_all_locks called on one table since lock_manager is shared globally
         self.queries[0][1].lock_manager.release_all_locks(transaction_id)
-        self.log.clear()
+        self.undo_log.clear()
+        # TBD, persist the log to disk here.
+
         return True
 
     def __query_unique_identifier(self, query, table, args):

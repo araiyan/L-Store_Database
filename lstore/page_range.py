@@ -90,17 +90,18 @@ class PageRange:
 
             else:
             # If current tail page doesn't have capacity move to the next tail page
-                has_capacity =  self.bufferpool.get_page_has_capacity(self.page_range_index, i, self.tail_page_index[i])
+                with self.page_range_lock:
+                    has_capacity =  self.bufferpool.get_page_has_capacity(self.page_range_index, i, self.tail_page_index[i])
 
-                if not has_capacity:
-                    self.tail_page_index[i] += 1
+                    if not has_capacity:
+                        self.tail_page_index[i] += 1
 
-                elif has_capacity is None:
-                    return False
+                    elif has_capacity is None:
+                        return False
+                        
+                    page_slot = self.bufferpool.write_page_next(self.page_range_index, i, self.tail_page_index[i], column)
                     
-                page_slot = self.bufferpool.write_page_next(self.page_range_index, i, self.tail_page_index[i], column)
-                
-                self.logical_directory[logical_rid][i - NUM_HIDDEN_COLUMNS] = (self.tail_page_index[i] * MAX_RECORD_PER_PAGE) + page_slot
+                    self.logical_directory[logical_rid][i - NUM_HIDDEN_COLUMNS] = (self.tail_page_index[i] * MAX_RECORD_PER_PAGE) + page_slot
 
         with self.page_range_lock:
             self.tps += 1
@@ -180,4 +181,3 @@ class PageRange:
         return json.dumps(self.serialize())
     
     
-
