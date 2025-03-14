@@ -4,6 +4,7 @@ from lstore.lock import LockManager
 from lstore.config import *
 from lstore.query import Query
 from lstore.transaction_log import TransactionLog
+
 class Transaction:
     
     log_manager = TransactionLog()
@@ -19,6 +20,7 @@ class Transaction:
         self.log_manager = TransactionLog()
         # Local undo log for rollback
         self.undo_log = []
+
 
     """
     # Adds the given query to this transaction
@@ -98,7 +100,7 @@ class Transaction:
             if result == False:
                 return self.abort()
             
-            # Record the log entry locally and in the log manager
+            # Record the log entry locally for potential rollback and in the log manager 
             self.undo_log.append(log_entry)
             
             # Record the log entry locally and in the persistent log manager for recovery
@@ -108,7 +110,6 @@ class Transaction:
             pre_args = log_entry.get("prev_columns")
             post_args = log_entry.get("columns")
             self.log_manager.log_operation(transaction_id, op, rid, pre_args, post_args)
-            
             
 
         return self.commit()
@@ -120,6 +121,7 @@ class Transaction:
 
         # reverse logs to process latest first
         for entry in reversed(self.undo_log):
+
             query_type = entry["query"]
             table = entry["table"]
             args = entry["args"]
@@ -171,8 +173,6 @@ class Transaction:
                     table.index.update_all_indices(primary_key, prev_columns,upd_columns)
                 except Exception as e:
                     print(f"Error rolling back update for RID {rid}: {e}")
-
-
         
         transaction_id = id(self)
         if self.queries and self.queries[0][1].lock_manager.transaction_states.get(transaction_id):
@@ -189,6 +189,7 @@ class Transaction:
         self.queries[0][1].lock_manager.release_all_locks(transaction_id)
         self.undo_log.clear()
         # TBD, persist the log to disk here.
+
         return True
 
     def __query_unique_identifier(self, query, table, args):
