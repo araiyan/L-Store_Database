@@ -59,13 +59,13 @@ transaction.py: run and uniqueIdentifier  Raiyan +47
 lock.py: upgrade S to X                   Raiyan +33
 lock.py: upgrade IS to IX                 Raiyan +14
 index.py: concurrent index update         Tracy +50
-query.py: query level granularity locks   Molly +216 (unused)
+query.py: granularity locks / log update  Molly +137
 
 ## Total Contributions:
 
 Raiyan  +361
 Tracy   +224
+Molly   +137
 Leo     +124 (57 unused)
 Derrick +92  (10 unused)
-Molly   +0  (216 unused)
 ```
