@@ -104,18 +104,19 @@ class BufferPool:
         otherwise returns None'''
 
         page_disk_path = self.get_page_path(page_range_index, record_column, page_index)
-        page_frame_num = self.frame_directory.get(page_disk_path, None)
+        with self.bufferpool_lock:  # Ensure thread safety
+            page_frame_num = self.frame_directory.get(page_disk_path, None)
 
-        if (page_frame_num is None):
-            # If no frames are available and we were unable to diallocate frames due to lock then returns None
-            if (self.available_frames_queue.empty() and not self.__replacement_policy()):
-                return None
+            if (page_frame_num is None):
+                # If no frames are available and we were unable to diallocate frames due to lock then returns None
+                if (self.available_frames_queue.empty() and not self.__replacement_policy()):
+                    return None
             
-            current_frame:Frame = self.__load_new_frame(page_disk_path)
-            return current_frame
+                current_frame:Frame = self.__load_new_frame(page_disk_path)
+            else:
+                current_frame: Frame = self.frames[page_frame_num]
         
-        current_frame:Frame = self.frames[page_frame_num]
-        current_frame.pin.count_up()
+            current_frame.pin.count_up()
         return current_frame
     
     def get_page_has_capacity(self, page_range_index, record_column, page_index) -> Union[bool, None]:

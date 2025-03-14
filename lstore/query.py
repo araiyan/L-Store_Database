@@ -47,7 +47,8 @@ class Query:
                 "type": "delete",
                 "rid": base_rid[0],
                 "table": self.table.name,
-                "prev_columns": prev_columns,
+                "columns": None,
+                "prev_columns": prev_columns.copy(),
                 "page_range": base_rid[0] // MAX_RECORD_PER_PAGE_RANGE,
                 "index_changes": index_changes
             })
@@ -100,6 +101,7 @@ class Query:
                 "rid": record.rid,
                 "table": self.table.name,
                 "columns": columns,
+                "prev_columns": None,
                 "page_range": record.rid // MAX_RECORD_PER_PAGE_RANGE,
                 "index_changes": index_changes
             })
@@ -289,7 +291,8 @@ class Query:
                 "rid": rid_location[0],
                 "prev_tail_rid": prev_tail_rid,
                 "table": self.table.name,
-                "prev_columns": prev_columns,
+                "columns": new_columns.copy(),
+                "prev_columns": prev_columns.copy(),
                 "page_range": page_range_index,
                 "index_changes": index_changes
             })
