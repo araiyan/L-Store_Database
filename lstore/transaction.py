@@ -117,7 +117,6 @@ class Transaction:
     
     def abort(self):
         '''Rolls back the transaction and releases all locks'''
-        print("Aborting transaction")
 
         # reverse logs to process latest first
         for entry in reversed(self.undo_log):
