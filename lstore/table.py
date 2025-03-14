@@ -129,19 +129,21 @@ class Table:
         # print("Merge is happening")
 
         while True:
-            # Block ensures that we wait for a record to be added to the queue first
-            # before we continue merging a record
-            merge_request:MergeRequest = self.merge_queue.get()
-
+            merge_request = self.merge_queue.get()
 
             # make a copy of the base page for the recieved rid
             start_rid = merge_request.page_range_index * MAX_RECORD_PER_PAGE_RANGE
             end_rid = min(start_rid + MAX_RECORD_PER_PAGE_RANGE, self.rid_index)
 
-            current_page_range:PageRange = self.page_ranges[merge_request.page_range_index]
+            current_page_range = self.page_ranges[merge_request.page_range_index]
 
             for rid in range(start_rid, end_rid):
                 _, page_index, page_slot = self.get_base_record_location(rid)
+
+                # Avoid merging if transaction is shrinking
+                if self.lock_manager.transaction_states.get(-1, '') == 'shrinking':
+                    print(f"Skipping merge for {rid} - Transaction is in shrinking phase")
+                    continue
 
                 base_record_columns = current_page_range.copy_base_record(page_index, page_slot)
                 base_merge_time = base_record_columns[UPDATE_TIMESTAMP_COLUMN]
@@ -154,28 +156,22 @@ class Table:
                 # Get the latest record
                 current_rid = base_record_columns[INDIRECTION_COLUMN]
                 latest_schema_encoding = base_record_columns[SCHEMA_ENCODING_COLUMN]
-                latest_timestamp = current_page_range.read_tail_record_column(current_rid, TIMESTAMP_COLUMN)
-                current_time_stamp = latest_timestamp
 
-                # if current rid < MAX_RECORD_PER_PAGE_RANGE, then we are at the base record
-                while current_rid >= MAX_RECORD_PER_PAGE_RANGE and latest_schema_encoding != 0 and current_time_stamp > base_merge_time:
+                while current_rid >= MAX_RECORD_PER_PAGE_RANGE and latest_schema_encoding != 0:
                     indirection_column = current_page_range.read_tail_record_column(current_rid, INDIRECTION_COLUMN)
                     schema_encoding = current_page_range.read_tail_record_column(current_rid, SCHEMA_ENCODING_COLUMN)
-                    current_time_stamp = current_page_range.read_tail_record_column(current_rid, TIMESTAMP_COLUMN)
-                    
+
                     for col_index in range(self.num_columns):
-                        if (latest_schema_encoding & (1 << col_index)) and (schema_encoding & (1 << col_index)):
+                        if latest_schema_encoding & (1 << col_index) and schema_encoding & (1 << col_index):
                             latest_schema_encoding ^= (1 << col_index)
                             base_record_columns[col_index + NUM_HIDDEN_COLUMNS] = current_page_range.read_tail_record_column(current_rid, col_index + NUM_HIDDEN_COLUMNS)
 
                     current_rid = indirection_column
-                
-                base_record_columns[UPDATE_TIMESTAMP_COLUMN] = latest_timestamp
 
                 base_record_columns[UPDATE_TIMESTAMP_COLUMN] = int(time())
                 self.bufferpool.write_page_slot(merge_request.page_range_index, UPDATE_TIMESTAMP_COLUMN, page_index, page_slot, base_record_columns[UPDATE_TIMESTAMP_COLUMN])
 
-                # consolidate base page columns
+                # Consolidate updates to base page
                 for i in range(self.num_columns):
                     self.bufferpool.write_page_slot(merge_request.page_range_index, NUM_HIDDEN_COLUMNS + i, page_index, page_slot, base_record_columns[i + NUM_HIDDEN_COLUMNS])
             

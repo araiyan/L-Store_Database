@@ -12,6 +12,8 @@ class Page:
         return self.num_records < MAX_RECORD_PER_PAGE
 
     def write(self, value):
+        if self.num_records * INTEGER_BYTE_SIZE >= PAGE_SIZE:
+            raise MemoryError("Attempting to write beyond page limits!")
         struct.pack_into("i", self.data, self.num_records * INTEGER_BYTE_SIZE, value)
         self.num_records += 1
         return (self.num_records - 1)

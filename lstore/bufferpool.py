@@ -104,18 +104,19 @@ class BufferPool:
         otherwise returns None'''
 
         page_disk_path = self.get_page_path(page_range_index, record_column, page_index)
-        page_frame_num = self.frame_directory.get(page_disk_path, None)
+        with self.bufferpool_lock:  # Ensure thread safety
+            page_frame_num = self.frame_directory.get(page_disk_path, None)
 
-        if (page_frame_num is None):
-            # If no frames are available and we were unable to diallocate frames due to lock then returns None
-            if (self.available_frames_queue.empty() and not self.__replacement_policy()):
-                return None
+            if (page_frame_num is None):
+                # If no frames are available and we were unable to diallocate frames due to lock then returns None
+                if (self.available_frames_queue.empty() and not self.__replacement_policy()):
+                    return None
             
-            current_frame:Frame = self.__load_new_frame(page_disk_path)
-            return current_frame
+                current_frame:Frame = self.__load_new_frame(page_disk_path)
+            else:
+                current_frame: Frame = self.frames[page_frame_num]
         
-        current_frame:Frame = self.frames[page_frame_num]
-        current_frame.pin.count_up()
+            current_frame.pin.count_up()
         return current_frame
     
     def get_page_has_capacity(self, page_range_index, record_column, page_index) -> Union[bool, None]:
@@ -214,7 +215,7 @@ class BufferPool:
         '''Unloads all frames in the bufferpool'''
         fail_count = 0
         while (not self.unavailable_frames_queue.empty()):
-            if (self.__replacement_policy() is False):
+            if (not self.__replacement_policy()):
                 fail_count += 1
                 if (fail_count > MAX_NUM_FRAME):
                     raise MemoryError("Unable to unload all frames")
@@ -258,21 +259,28 @@ class BufferPool:
         Using LRU Policy
         Returns true if we were properly able to allocate new space for a frame
         '''
-        num_used_frames = self.unavailable_frames_queue.qsize()
+        with self.bufferpool_lock:
+            freed_any = False
+            num_used_frames = self.unavailable_frames_queue.qsize()
 
-        for _ in range(num_used_frames):
-            frame_num = self.unavailable_frames_queue.get()
-            current_frame:Frame = self.frames[frame_num]
+            for _ in range(num_used_frames):
+                frame_num = self.unavailable_frames_queue.get()
+                current_frame:Frame = self.frames[frame_num]
 
-            if (current_frame.pin.count == 0):
-                #print(f"deleting {current_frame.page_path} from frame_directory")
-                # If the frame is not being used by any processes then we can deallocate it
-                del self.frame_directory[current_frame.page_path]
-                current_frame.unload_page()
-                self.available_frames_queue.put(frame_num)
-                return True
-            else:
-                # If the frame is being used by a process then we put it back in the queue
-                self.unavailable_frames_queue.put(frame_num)
+                if (current_frame.pin.count == 0):
+                    #print(f"deleting {current_frame.page_path} from frame_directory")
+                    # If the frame is not being used by any processes then we can deallocate it
+                    if current_frame.page_path in self.frame_directory:
+                        del self.frame_directory[current_frame.page_path]
+                    else:
+                        print(f"WARNING: Page {current_frame.page_path} was already removed. Skipping deletion.")
 
-        return False
+                    current_frame.unload_page()
+                    self.available_frames_queue.put(frame_num)
+                    freed_any = True
+                else:
+                    # If the frame is being used by a process then we put it back in the queue
+                    self.unavailable_frames_queue.put(frame_num)
+                    
+                #print("DEBUG: No frames available for eviction.")
+                return freed_any

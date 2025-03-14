@@ -252,13 +252,4 @@ class LockManager:
             else:
                 raise ValueError("Invalid lock upgrade", current_lock_type, new_lock_type)
             self.condition.notify_all()
-            
-    def has_lock(self, transaction_id, record_id, lock_type):
-        """ Checks if the transaction already holds the requested lock. """
-        with self.condition:
-            if lock_type in ['S', 'X']:
-                return transaction_id in self.lock_table[record_id][lock_type]
-            elif lock_type in ['IS', 'IX']:
-                return self.lock_table[record_id][lock_type].count > 0
-            return False
 

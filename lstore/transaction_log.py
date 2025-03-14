@@ -5,14 +5,15 @@ class TransactionLog:
         self.log_file = log_file
         self.transactions = {}
 
-    def log_operation(self, transaction_id, operation, record_id, before, after):
+    def log_operation(self, transaction_id, table_name, operation, record_id, pre_args=None, post_args=None):
         log_entry = {
             "timestamp": datetime.now(),
             "transaction_id": transaction_id,
+            "table":table_name,
             "operation": operation,
             "record_id": record_id,
-            "before": before,
-            "after": after
+            "pre_args": pre_args,
+            "post_args": post_args
         }
 
         if transaction_id not in self.transactions:
