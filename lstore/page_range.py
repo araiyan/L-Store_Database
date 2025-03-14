@@ -77,51 +77,35 @@ class PageRange:
 
     def write_tail_record(self, logical_rid, *columns) -> bool:
         '''Writes a set of columns to the tail pages returns true on success'''
-        # Initialize logical directory for the record
+
         self.logical_directory[logical_rid] = [None] * (self.total_num_columns - NUM_HIDDEN_COLUMNS)
 
         for (i, column) in enumerate(columns):
-            if column is None:
+            if (column is None):
                 continue
-
-            if i < NUM_HIDDEN_COLUMNS:
+            
+            if (i < NUM_HIDDEN_COLUMNS):
                 page_index, page_slot = self.__get_hidden_column_location(logical_rid)
                 self.bufferpool.write_page_slot(self.page_range_index, i, page_index, page_slot, column)
+
             else:
-                # Loop until we successfully write the value
-                while True:
-                    has_capacity = self.bufferpool.get_page_has_capacity(self.page_range_index, i, self.tail_page_index[i])
+            # If current tail page doesn't have capacity move to the next tail page
+                with self.page_range_lock:
+                    has_capacity =  self.bufferpool.get_page_has_capacity(self.page_range_index, i, self.tail_page_index[i])
+
                     if not has_capacity:
-                        # No capacity on current tail page: move to the next one and retry.
                         self.tail_page_index[i] += 1
-                        continue
+
                     elif has_capacity is None:
-                        # Out of memory: try running the replacement policy
-                        #rem# print(f"No memory available for column {i}. Running replacement policy.")
-                        if not self.bufferpool.unload_all_frames():
-                            return False  # Fail if unable to free memory
-                        continue
-
-                    try:
-                        page_slot = self.bufferpool.write_page_next(self.page_range_index, i, self.tail_page_index[i], column)
-                        break  # Successfully wrote the value; exit the loop.
-                    except MemoryError as e:
-                        # Tail page turned out to be full despite our capacity check—increment and try again.
-                        #rem# print(f"Memory error writing tail record: {e}")
-                        self.tail_page_index[i] += 1
-                        continue
-
-                # Compute and store the physical location of the written value.
-                self.logical_directory[logical_rid][i - NUM_HIDDEN_COLUMNS] = (
-                    self.tail_page_index[i] * MAX_RECORD_PER_PAGE + page_slot
-                )
+                        return False
+                        
+                    page_slot = self.bufferpool.write_page_next(self.page_range_index, i, self.tail_page_index[i], column)
+                    
+                    self.logical_directory[logical_rid][i - NUM_HIDDEN_COLUMNS] = (self.tail_page_index[i] * MAX_RECORD_PER_PAGE) + page_slot
 
         with self.page_range_lock:
             self.tps += 1
-
         return True
-
-
     
     def read_tail_record_column(self, logical_rid, column) -> int:
         '''Reads a column from the tail pages given a logical rid'''
